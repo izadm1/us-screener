@@ -220,11 +220,57 @@ def plan(r):
         trig = min(r["prev_low"], r["px"]) if r["setup"].startswith(("Gap", "Breakdown")) else r["px"]
         stop, t1, t2 = trig + stop_dist, trig - stop_dist, trig - 2 * stop_dist
     else:
-        return dict(trigger=np.nan, stop=np.nan, target1=np.nan, target2=np.nan, shares=0)
+        return dict(trigger=np.nan, stop=np.nan, target1=np.nan, target2=np.nan, shares=0,
+                    target_price=np.nan, target_basis="", target_pct=np.nan,
+                    hold_t1="", hold_target="", hold_mins=np.nan)
     risk_usd = ACCOUNT_SIZE_USD * RISK_PER_TRADE_PCT / 100
     shares = int(risk_usd // stop_dist) if stop_dist > 0 else 0
     shares = min(shares, int(ACCOUNT_SIZE_USD // trig)) if trig > 0 else 0
-    return dict(trigger=trig, stop=stop, target1=t1, target2=t2, shares=shares)
+    tgt, basis = target_price(r, trig, t1, t2)
+    m1, mt = est_minutes(r, abs(t1 - trig)), est_minutes(r, abs(tgt - trig))
+    return dict(trigger=trig, stop=stop, target1=t1, target2=t2, shares=shares,
+                target_price=tgt, target_basis=basis, target_pct=(tgt / trig - 1) * 100,
+                hold_t1=hold_label(m1), hold_target=hold_label(mt), hold_mins=mt)
+
+
+def target_price(r, trig, t1, t2):
+    """Main target: 2R, unless a nearby chart level (where price often stalls) comes first."""
+    long_ = r["bias"] == "Long"
+    levels = {"yesterday's high": r["prev_high"], "20-day high": r["high_20d"],
+              "50-day avg": r["sma50"], "20-day avg": r["sma20"]} if long_ else \
+             {"yesterday's low": r["prev_low"], "20-day low": r["low_20d"],
+              "50-day avg": r["sma50"], "20-day avg": r["sma20"]}
+    best = None
+    for name, lvl in levels.items():
+        if lvl is None or math.isnan(lvl):
+            continue
+        # a level beyond 1R but before 2R caps the move; take the nearest one
+        if (long_ and t1 < lvl < t2) or (not long_ and t2 < lvl < t1):
+            if best is None or abs(lvl - trig) < abs(best[1] - trig):
+                best = (name, lvl)
+    if best:
+        return best[1], f"{best[0]} (resistance)" if long_ else f"{best[0]} (support)"
+    return t2, "2R (2× risk)"
+
+
+def est_minutes(r, dist):
+    """Rough time for price to travel `dist`, from the daily ATR.
+    Typical move over t hours ≈ ATR × speed × √(t / 6.5); in-play names (gap, volume) move faster."""
+    if not r["atr14"] or dist <= 0:
+        return np.nan
+    speed = min(max(0.7 + 0.3 * r["rel_vol_yday"] + 0.5 * r["gap_atr"], 0.8), 2.0)
+    return 6.5 * 60 * (dist / (r["atr14"] * speed)) ** 2
+
+
+def hold_label(mins):
+    if mins is None or math.isnan(mins):
+        return "—"
+    if mins < 60:
+        return f"~{max(15, int(round(mins / 15) * 15))} min"
+    if mins <= 6.5 * 60:
+        return f"~{mins / 60:.1f} h"
+    days = math.ceil(mins / (6.5 * 60))
+    return f"{days}+ days (swing)" if days > 1 else "full day"
 
 
 def run(demo=False, extra=()):
@@ -267,7 +313,9 @@ def run(demo=False, extra=()):
 COLS = [("ticker", "Ticker"), ("type", "Type"), ("setup", "Setup"), ("bias", "Bias"), ("score", "Score"),
         ("px", "Last / pre-mkt"), ("gap_pct", "Gap %"), ("rel_vol_yday", "RelVol (yday)"),
         ("atr_pct", "ATR %"), ("rsi14", "RSI 14"), ("prev_high", "Prev high"), ("prev_low", "Prev low"),
-        ("trigger", "Trigger"), ("stop", "Stop"), ("target1", "Target 1R"), ("target2", "Target 2R"),
+        ("trigger", "Entry trigger"), ("stop", "Stop"), ("target_price", "Target price"),
+        ("target_pct", "To target %"), ("hold_target", "Est. hold"), ("target_basis", "Target based on"),
+        ("target1", "Take ½ at (1R)"), ("hold_t1", "Hold to 1R"),
         ("shares", "Size (sh)"), ("sma50", "50-day avg"), ("from_52w_high_pct", "From 52w high %"),
         ("chg_5d_pct", "5-day %"), ("avg_dollar_vol_m", "Avg $ vol (M)")]
 
@@ -275,12 +323,12 @@ COLS = [("ticker", "Ticker"), ("type", "Type"), ("setup", "Setup"), ("bias", "Bi
 def fmt(v, key):
     if v is None or (isinstance(v, float) and math.isnan(v)):
         return "—"
-    if key in ("ticker", "type", "setup", "bias"):
+    if key in ("ticker", "type", "setup", "bias", "target_basis", "hold_t1", "hold_target"):
         return html.escape(str(v))
     if key == "shares":
         return f"{int(v):,}"
     if key.endswith("_pct") or key in ("gap_pct", "atr_pct"):
-        return f"{v:+.2f}" if key in ("gap_pct", "chg_5d_pct") else f"{v:.2f}"
+        return f"{v:+.2f}" if key in ("gap_pct", "chg_5d_pct", "target_pct") else f"{v:.2f}"
     if key == "avg_dollar_vol_m":
         return f"{v:,.0f}"
     if key in ("rel_vol_yday",):
@@ -298,7 +346,11 @@ def table(df, tid):
         tds = []
         for k, _ in COLS:
             v = r.get(k)
-            sort = "" if isinstance(v, str) else (f' data-v="{v}"' if v is not None and not (isinstance(v, float) and math.isnan(v)) else ' data-v="-1e18"')
+            if k == "hold_target":
+                v_sort = r.get("hold_mins")
+                sort = f' data-v="{v_sort}"' if isinstance(v_sort, float) and not math.isnan(v_sort) else ' data-v="1e18"'
+            else:
+                sort = "" if isinstance(v, str) else (f' data-v="{v}"' if v is not None and not (isinstance(v, float) and math.isnan(v)) else ' data-v="-1e18"')
             extra = ""
             if k == "gap_pct" and isinstance(v, (int, float)) and not math.isnan(v):
                 extra = ' class="pos"' if v > 0 else (' class="neg"' if v < 0 else "")
@@ -380,6 +432,8 @@ details{{margin-top:28px;color:var(--mut)}} details p,details li{{max-width:900p
 <ul>
 <li><b>Gap %</b> — latest pre-market (or today's) price vs yesterday's close. <b>RelVol</b> — yesterday's volume ÷ 20-day average. <b>ATR %</b> — average daily range as % of price.</li>
 <li><b>Trigger</b> — for gap/breakout longs, a break above yesterday's high or the pre-market price, whichever is higher (shorts mirror this on the low). <b>Stop</b> = trigger ∓ {STOP_ATR_MULT}×ATR. <b>Targets</b> at 1R and 2R. <b>Size</b> risks {RISK_PER_TRADE_PCT}% of ${ACCOUNT_SIZE_USD:,}, capped at the account size.</li>
+<li><b>Target price</b> — 2× the risk (2R) beyond the entry, or an earlier chart level (yesterday's high/low, 20-day high/low, 20- or 50-day average) if one sits in the way, since price often stalls there. <b>Take ½ at (1R)</b> — a first profit-taking point; move the stop to entry after it fills.</li>
+<li><b>Est. hold</b> — a rough time for price to reach the target once the entry triggers, worked out from the stock's average daily range (ATR): a typical move over <i>t</i> hours ≈ ATR × √(<i>t</i> ÷ 6.5), faster for names gapping on high volume. Use it as a time stop: if the trade hasn't moved your way by about this time, exit. Over a full session it shows "swing"; as a day trader, close by 3:55pm ET instead.</li>
 <li><b>Score</b> (0–100) ranks how in-play and trend-aligned a setup is: gap vs ATR 30, volume 20, range 15, liquidity 10, with-trend 15, not stretched 10. It is a ranking, not a win probability.</li>
 <li>Let the first 5–15 minutes after the 9:30am ET open settle before acting on gap triggers. Check earnings dates and news before trading — this screen does not read the news.</li>
 <li>Research aid only, not investment advice.</li>
@@ -420,7 +474,8 @@ def main():
     top = df[df["bias"] != "Neutral"].head(5)
     print("\nTop setups:")
     for _, r in top.iterrows():
-        print(f"  {r['ticker']:<6} {r['bias']:<5} {r['setup']:<32} gap {r['gap_pct']:+.2f}%  score {r['score']:.0f}")
+        print(f"  {r['ticker']:<6} {r['bias']:<5} {r['setup']:<32} gap {r['gap_pct']:+.2f}%  score {r['score']:.0f}"
+              f"  entry {r['trigger']:.2f} target {r['target_price']:.2f} ({r['target_pct']:+.1f}%) hold {r['hold_target']}")
     if meta["skipped"]:
         print(f"\nSkipped {len(meta['skipped'])}: {', '.join(meta['skipped'][:15])}")
     print(f"\nReport: {html_path}\nCSV:    {csv_path}")
