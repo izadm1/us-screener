@@ -354,20 +354,175 @@ def table(df, tid):
     return f'<div class="wrap"><table id="{tid}"><thead><tr>{head}</tr></thead><tbody>{"".join(body)}</tbody></table></div>'
 
 
-def write_report(df, meta, out_dir):
+# ---------- track record: save today's plan, score yesterday's ----------
+PLAN_CUTOFF_ET = dt.time(10, 0)   # only plans made before this time count (no hindsight)
+ENTRY_FROM_ET = dt.time(9, 45)    # entries allowed after the open settles
+EXIT_BY_ET = dt.time(15, 55)      # flat by the close
+
+
+def save_plan(active, meta, hist_dir, ny_now):
+    """Keep the first pre-10am plan of each day, so it can be scored the next day."""
+    if ny_now.time() >= PLAN_CUTOFF_ET or not meta["with_premarket"] or active.empty:
+        return None
+    hist_dir.mkdir(parents=True, exist_ok=True)
+    f = hist_dir / f"plan-{ny_now.date()}.csv"
+    if f.exists():
+        return f
+    cols = ["ticker", "trade", "bias", "score", "trigger", "stop", "target_price", "shares", "hold_mins"]
+    active[cols].assign(planned_at=meta["run_ny"]).to_csv(f, index=False, float_format="%.4f")
+    return f
+
+
+def bars_for_day(intra, t, day):
+    b = per_ticker(intra, t)
+    if b.empty:
+        return b
+    ix = b.index.tz_convert("America/New_York") if b.index.tz is not None else b.index
+    b = b.set_axis(ix)
+    b = b[(ix.date == day)]
+    return b[(b.index.time >= ENTRY_FROM_ET) & (b.index.time < dt.time(16, 0))].dropna(subset=["Close"])
+
+
+def score_trade(p, bars):
+    """Walk 5-minute bars: entry on a break of the trigger, then stop or target, else exit at 3:55pm.
+    If stop and target fall in the same bar, count it as stopped (conservative)."""
+    long_ = p["bias"] == "Long"
+    trig, stop, tgt = p["trigger"], p["stop"], p["target_price"]
+    if bars.empty:
+        return dict(result="No data", exit=np.nan, pl_pct=np.nan, r=np.nan, when="")
+    entry_t = None
+    for ts, b in bars.iterrows():
+        if entry_t is None:
+            if ts.time() >= EXIT_BY_ET:
+                break
+            hit = b["High"] >= trig if long_ else b["Low"] <= trig
+            if not hit:
+                continue
+            entry_t, entry_px = ts, (max(trig, b["Open"]) if long_ else min(trig, b["Open"]))
+        # after entry (including the entry bar)
+        stop_hit = b["Low"] <= stop if long_ else b["High"] >= stop
+        tgt_hit = b["High"] >= tgt if long_ else b["Low"] <= tgt
+        if stop_hit:
+            return _res("Stopped out", entry_px, stop, long_, p, entry_t, ts)
+        if tgt_hit:
+            return _res("Target hit", entry_px, tgt, long_, p, entry_t, ts)
+        if ts.time() >= EXIT_BY_ET:
+            return _res("Closed, target not hit", entry_px, b["Close"], long_, p, entry_t, ts)
+    if entry_t is None:
+        return dict(result="No entry", exit=np.nan, pl_pct=np.nan, r=np.nan, when="")
+    last = bars.iloc[-1]
+    return _res("Closed, target not hit", entry_px, last["Close"], long_, p, entry_t, bars.index[-1])
+
+
+def _res(label, entry, exit_, long_, p, t_in, t_out):
+    pl = (exit_ / entry - 1) * (1 if long_ else -1) * 100
+    risk = abs(p["trigger"] - p["stop"])
+    r = ((exit_ - entry) if long_ else (entry - exit_)) / risk if risk else np.nan
+    mins = (t_out - t_in).total_seconds() / 60
+    took = f"{int(mins)} min" if mins < 60 else f"{mins / 60:.1f} h"
+    return dict(result=label, exit=exit_, pl_pct=pl, r=r,
+                pl_usd=((exit_ - entry) if long_ else (entry - exit_)) * p["shares"],
+                when=f"in at {t_in:%H:%M}, out {t_out:%H:%M} ET ({took})")
+
+
+def score_previous(hist_dir, ny_today, demo=False):
+    """Score the latest saved plan from before today. Returns (day, results DataFrame) or (None, None)."""
+    plans = sorted(f for f in hist_dir.glob("plan-*.csv") if f.stem[5:] < str(ny_today))
+    if not plans:
+        return None, None
+    f = plans[-1]
+    day = dt.date.fromisoformat(f.stem[5:])
+    plan_df = pd.read_csv(f)
+    tickers = plan_df["ticker"].tolist()
+    if demo:
+        intra = _demo_session(plan_df, day)
+    else:
+        import yfinance as yf
+        intra = yf.download(tickers, period="5d", interval="5m", group_by="ticker",
+                            auto_adjust=False, threads=True, progress=False)
+    out = []
+    for _, p in plan_df.iterrows():
+        out.append({**p.to_dict(), **score_trade(p, bars_for_day(intra, p["ticker"], day))})
+    res = pd.DataFrame(out)
+    # keep a running log, one block per day
+    log = hist_dir / "results.csv"
+    old = pd.read_csv(log) if log.exists() else pd.DataFrame()
+    if old.empty or str(day) not in old.get("day", pd.Series(dtype=str)).astype(str).values:
+        pd.concat([old, res.assign(day=str(day))]).to_csv(log, index=False, float_format="%.4f")
+    return day, res
+
+
+def _demo_session(plan_df, day, seed=3):
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range(pd.Timestamp(day).tz_localize("America/New_York") + pd.Timedelta(hours=9, minutes=30),
+                        periods=78, freq="5min")
+    frames = {}
+    for _, p in plan_df.iterrows():
+        step = abs(p["trigger"] - p["stop"]) * 0.35
+        c = p["trigger"] * (1 + rng.normal(0, 0.002)) + np.cumsum(rng.normal(0, step, len(idx)))
+        frames[p["ticker"]] = pd.DataFrame({"Open": c, "High": c + step / 2, "Low": c - step / 2, "Close": c,
+                                            "Volume": 1e4}, index=idx)
+    return pd.concat(frames, axis=1)
+
+
+def results_html(day, res, hist_dir):
+    if day is None:
+        return '<h2>Previous day\'s results</h2><p class="note">Starts tomorrow: today\'s pre-10am plan is saved and scored after the close.</p>'
+    order = {"Target hit": 0, "Closed, target not hit": 1, "Stopped out": 2, "No entry": 3, "No data": 4}
+    res = res.sort_values(by=["result", "score"], key=lambda c: c.map(order) if c.name == "result" else -c)
+    traded = res[res["result"].isin(["Target hit", "Stopped out", "Closed, target not hit"])]
+    n = lambda k: int((res["result"] == k).sum())
+    net_r, net_usd = traded["r"].sum(), traded["pl_usd"].sum()
+    wins = int((traded["r"] > 0).sum())
+    summary = (f'{len(traded)} triggered: <span class="pos">{n("Target hit")} target hit</span> · '
+               f'{n("Closed, target not hit")} closed without target · <span class="neg">{n("Stopped out")} stopped</span> · '
+               f'{n("No entry")} never triggered. Net <b class="{"pos" if net_r >= 0 else "neg"}">{net_r:+.1f}R '
+               f'(${net_usd:+,.0f})</b>, {wins}/{len(traded) or 0} winners.')
+    log = hist_dir / "results.csv"
+    track = ""
+    if log.exists():
+        allr = pd.read_csv(log)
+        allt = allr[allr["result"].isin(["Target hit", "Stopped out", "Closed, target not hit"])]
+        days = allr["day"].nunique()
+        if days > 1 and len(allt):
+            track = (f'<p class="sub">Track record, {days} days: {len(allt)} trades, '
+                     f'{(allt["r"] > 0).mean() * 100:.0f}% winners, {(allt["result"] == "Target hit").mean() * 100:.0f}% hit target, '
+                     f'net {allt["r"].sum():+.1f}R (${allt["pl_usd"].sum():+,.0f}).</p>')
+    rows = []
+    for _, r in res.iterrows():
+        cls = {"Target hit": "pos", "Stopped out": "neg"}.get(r["result"], "")
+        fmtn = lambda v, f="{:,.2f}": "—" if pd.isna(v) else f.format(v)
+        rows.append(f'<tr><td>{html.escape(r["ticker"])}</td><td>{html.escape(r["trade"])}</td>'
+                    f'<td>{fmtn(r["trigger"])}</td><td>{fmtn(r["target_price"])}</td>'
+                    f'<td class="{cls}">{r["result"]}</td><td>{fmtn(r["exit"])}</td>'
+                    f'<td class="{cls}">{fmtn(r["pl_pct"], "{:+.1f}%")}</td><td class="{cls}">{fmtn(r.get("r"), "{:+.1f}R")}</td>'
+                    f'<td>{html.escape(r["when"] or "")}</td></tr>')
+    return (f'<h2>Results — {day:%a %d %b} plan</h2><p class="sub">{summary}</p>{track}'
+            '<div class="wrap"><table><thead><tr><th>Ticker</th><th>Trade</th><th>Entry</th><th>Target</th>'
+            '<th>Result</th><th>Exit</th><th>P/L</th><th>R</th><th>Timing</th></tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div>')
+
+
+SHORT_SETUP = {"Gap & Go long": "Gap & Go", "Gap & Go short": "Gap & Go", "Gap up — fade watch": "Gap fade",
+               "Gap down — bounce watch": "Gap bounce", "Breakout watch (20-day high)": "Breakout",
+               "Breakdown watch (20-day low)": "Breakdown", "Oversold bounce": "Oversold bounce",
+               "Overbought — pullback risk": "Overbought fade", "Trend pullback to 20-day avg": "Trend pullback",
+               "Downtrend rally to 20-day avg": "Rally fade"}
+
+
+def trade_label(df):
+    lab = df["bias"] + " · " + df["setup"].map(SHORT_SETUP).fillna(df["setup"])
+    return lab.where(df["type"] != "ETF", lab + " (ETF)")
+
+
+def write_report(df, meta, out_dir, results_block=""):
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now().strftime("%Y-%m-%d")
     csv_path = out_dir / f"screener-{stamp}.csv"
     df.to_csv(csv_path, index=False, float_format="%.4f")
 
-    short = {"Gap & Go long": "Gap & Go", "Gap & Go short": "Gap & Go", "Gap up — fade watch": "Gap fade",
-             "Gap down — bounce watch": "Gap bounce", "Breakout watch (20-day high)": "Breakout",
-             "Breakdown watch (20-day low)": "Breakdown", "Oversold bounce": "Oversold bounce",
-             "Overbought — pullback risk": "Overbought fade", "Trend pullback to 20-day avg": "Trend pullback",
-             "Downtrend rally to 20-day avg": "Rally fade"}
     df = df.copy()
-    df["trade"] = df["bias"] + " · " + df["setup"].map(short).fillna(df["setup"])
-    df.loc[df["type"] == "ETF", "trade"] += " (ETF)"
+    df["trade"] = trade_label(df)
     active = df[df["bias"] != "Neutral"]
     top = active.head(TOP_N)
     idx = {r["ticker"]: r for _, r in df.iterrows()}
@@ -420,7 +575,8 @@ details{{margin-top:28px;color:var(--mut)}} details p,details li{{max-width:900p
 <button data-f="all" class="on">All</button><button data-f="Long">Long</button><button data-f="Short">Short</button><button data-f="Stock">Stocks</button><button data-f="ETF">ETFs</button>
 </div>
 {table(active, 'all')}
-<p class="note">Enter on a break of <b>Entry</b> after 9:45am ET. Sell half halfway to target, then move stop to entry. Exit at <b>Stop</b>, <b>Target</b>, or if not working by <b>Hold</b> time. Close all by 3:55pm ET. Check news/earnings first. Not investment advice.</p>
+{results_block}
+<p class="note" id="rules">Enter on a break of <b>Entry</b> after 9:45am ET. Exit at <b>Stop</b> or <b>Target</b>; if neither by the <b>Hold</b> time, consider cutting it. Close all by 3:55pm ET. Results assume exactly these rules, full position. Check news/earnings first. Not investment advice.</p>
 </main>
 <script>
 function sortBy(th){{const t=th.closest('table'),i=[...th.parentNode.children].indexOf(th),b=t.tBodies[0];
@@ -446,12 +602,25 @@ def main():
     ap.add_argument("--no-open", action="store_true", help="don't open the report in a browser")
     ap.add_argument("--add", default="", help="extra tickers, comma-separated (e.g. today's news movers)")
     ap.add_argument("--out", default=str(OUT_DIR), help="output folder")
+    ap.add_argument("--history", default=str(Path(__file__).resolve().parent / "history"),
+                    help="folder for saved daily plans and results")
     a = ap.parse_args()
     extra = [x.strip().upper() for x in a.add.split(",") if x.strip()]
     df, meta = run(demo=a.demo, extra=extra)
     if df.empty:
         sys.exit("Nothing passed the filters — check your internet connection or loosen FILTERS.")
-    html_path, csv_path = write_report(df, meta, Path(a.out).expanduser())
+    hist = Path(a.history)
+    ny_now = pd.Timestamp.now(tz="America/New_York")
+    active = df[df["bias"] != "Neutral"].copy()
+    active["trade"] = trade_label(active)
+    save_plan(active, meta, hist, ny_now)
+    try:
+        day, res = score_previous(hist, ny_now.date(), demo=a.demo)
+        block = results_html(day, res, hist)
+    except Exception as e:
+        print(f"Could not score previous plan: {e}")
+        block = ""
+    html_path, csv_path = write_report(df, meta, Path(a.out).expanduser(), block)
     top = df[df["bias"] != "Neutral"].head(5)
     print("\nTop setups:")
     for _, r in top.iterrows():
