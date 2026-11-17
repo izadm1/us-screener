@@ -1,0 +1,47 @@
+name: Daily screener
+
+on:
+  schedule:
+    # Times are UTC. 12:45 = 20:45 Malaysia = before the US open all year.
+    - cron: "45 12 * * 1-5"
+    # Refresh every hour while the US market is open (≈ 22:15–05:15 Malaysia).
+    - cron: "15 14-20 * * 1-5"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Kuala_Lumpur
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run screener
+        run: |
+          python us_screener.py --no-open --out site
+          cp site/latest.html site/index.html
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
