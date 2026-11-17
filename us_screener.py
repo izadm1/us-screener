@@ -48,7 +48,7 @@ FILTERS = {
 ACCOUNT_SIZE_USD = 25_000   # used for position size
 RISK_PER_TRADE_PCT = 0.5    # % of account risked per trade
 STOP_ATR_MULT = 0.5         # intraday stop distance = 0.5 x daily ATR from the trigger
-TOP_N = 15                  # rows in the "Top setups" section
+TOP_N = 5                   # long picks shown on the report
 
 OUT_DIR = Path.home() / "Documents" / "Stock Screener"
 # ────────────────────────────────────────────────────────────────────
@@ -510,6 +510,11 @@ SHORT_SETUP = {"Gap & Go long": "Gap & Go", "Gap & Go short": "Gap & Go", "Gap u
                "Downtrend rally to 20-day avg": "Rally fade"}
 
 
+def top_longs(df, n=None):
+    """The report's picks: highest-scoring long setups."""
+    return df[df["bias"] == "Long"].sort_values("score", ascending=False).head(n or TOP_N)
+
+
 def trade_label(df):
     lab = df["bias"] + " · " + df["setup"].map(SHORT_SETUP).fillna(df["setup"])
     return lab.where(df["type"] != "ETF", lab + " (ETF)")
@@ -570,11 +575,9 @@ details{{margin-top:28px;color:var(--mut)}} details p,details li{{max-width:900p
 <p class="sub">Updated {meta['run_local']} MYT ({meta['run_ny']})</p>
 {demo_banner}{pm_note}
 <div class="tiles">{''.join(tile(t) for t in ['SPY','QQQ','IWM','UVXY'])}</div>
-<p class="sub">Market {tone} · <span class="pos">{n_long} long</span> · <span class="neg">{n_short} short</span> · size risks {RISK_PER_TRADE_PCT}% of ${ACCOUNT_SIZE_USD:,}</p>
-<div class="bar" id="flt">
-<button data-f="all" class="on">All</button><button data-f="Long">Long</button><button data-f="Short">Short</button><button data-f="Stock">Stocks</button><button data-f="ETF">ETFs</button>
-</div>
-{table(active, 'all')}
+<p class="sub">Market {tone} · size risks {RISK_PER_TRADE_PCT}% of ${ACCOUNT_SIZE_USD:,}</p>
+<h2>Top {TOP_N} long picks</h2>
+{table(top_longs(df), 'all') if len(top_longs(df)) else '<p class="note">No long setups today.</p>'}
 {results_block}
 <p class="note" id="rules">Enter on a break of <b>Entry</b> after 9:45am ET. Exit at <b>Stop</b> or <b>Target</b>; if neither by the <b>Hold</b> time, consider cutting it. Close all by 3:55pm ET. Results assume exactly these rules, full position. Check news/earnings first. Not investment advice.</p>
 </main>
@@ -611,9 +614,9 @@ def main():
         sys.exit("Nothing passed the filters — check your internet connection or loosen FILTERS.")
     hist = Path(a.history)
     ny_now = pd.Timestamp.now(tz="America/New_York")
-    active = df[df["bias"] != "Neutral"].copy()
-    active["trade"] = trade_label(active)
-    save_plan(active, meta, hist, ny_now)
+    picks = top_longs(df).copy()
+    picks["trade"] = trade_label(picks)
+    save_plan(picks, meta, hist, ny_now)
     try:
         day, res = score_previous(hist, ny_now.date(), demo=a.demo)
         block = results_html(day, res, hist)
@@ -621,8 +624,8 @@ def main():
         print(f"Could not score previous plan: {e}")
         block = ""
     html_path, csv_path = write_report(df, meta, Path(a.out).expanduser(), block)
-    top = df[df["bias"] != "Neutral"].head(5)
-    print("\nTop setups:")
+    top = top_longs(df)
+    print("\nTop long picks:")
     for _, r in top.iterrows():
         print(f"  {r['ticker']:<6} {r['bias']:<5} {r['setup']:<32} gap {r['gap_pct']:+.2f}%  score {r['score']:.0f}"
               f"  entry {r['trigger']:.2f} target {r['target_price']:.2f} ({r['target_pct']:+.1f}%) hold {r['hold_target']}")
