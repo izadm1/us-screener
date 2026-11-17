@@ -61,8 +61,10 @@ def fetch_yahoo(tickers):
                         auto_adjust=False, threads=True, progress=False)
     intraday = yf.download(tickers, period="2d", interval="5m", prepost=True,
                            group_by="ticker", auto_adjust=False, threads=True, progress=False)
-    names = {}
-    return daily, intraday, names
+    # 60 days of 5-minute regular-session bars: lets the backtest see whether stop or target came first
+    hist5 = yf.download(tickers, period="60d", interval="5m", group_by="ticker",
+                        auto_adjust=False, threads=True, progress=False)
+    return daily, intraday, hist5
 
 
 def fetch_demo(tickers, seed=7):
@@ -89,7 +91,7 @@ def fetch_demo(tickers, seed=7):
                                     "Volume": rng.uniform(1e3, 2e5, len(pre_idx))}, index=pre_idx)
     daily = pd.concat(d_frames, axis=1)
     intraday = pd.concat(i_frames, axis=1)
-    return daily, intraday, {}
+    return daily, intraday, None
 
 
 def per_ticker(frame, t):
@@ -113,6 +115,18 @@ def atr(df, n=14):
     pc = df["Close"].shift()
     tr = pd.concat([df["High"] - df["Low"], (df["High"] - pc).abs(), (df["Low"] - pc).abs()], axis=1).max(axis=1)
     return tr.ewm(alpha=1 / n, adjust=False).mean()
+
+
+def adx(df, n=14):
+    """Average Directional Index: trend strength (above ~25 = trending)."""
+    up, dn = df["High"].diff(), -df["Low"].diff()
+    pdm = up.where((up > dn) & (up > 0), 0.0)
+    ndm = dn.where((dn > up) & (dn > 0), 0.0)
+    a = atr(df, n)
+    pdi = 100 * pdm.ewm(alpha=1 / n, adjust=False).mean() / a
+    ndi = 100 * ndm.ewm(alpha=1 / n, adjust=False).mean() / a
+    dx = 100 * (pdi - ndi).abs() / (pdi + ndi).replace(0, np.nan)
+    return dx.ewm(alpha=1 / n, adjust=False).mean()
 
 
 def premarket_last(intra, ny_today):
@@ -152,6 +166,25 @@ def analyse(t, kind, d, intra, ny_today):
         "high_52w": float(h.max()),
         "chg_5d_pct": float((last / c.iloc[-6] - 1) * 100),
     }
+    # trend, momentum, volatility and volume-quality features
+    ema12, ema26 = c.ewm(span=12, adjust=False).mean(), c.ewm(span=26, adjust=False).mean()
+    macd = ema12 - ema26
+    hist_ = macd - macd.ewm(span=9, adjust=False).mean()
+    sd20 = c.rolling(20).std()
+    bbw = (4 * sd20 / c.rolling(20).mean()).dropna()
+    rng = h - l
+    up_v = v.where(c > c.shift(), 0).tail(20).sum()
+    dn_v = v.where(c < c.shift(), 0).tail(20).sum()
+    row.update({
+        "ret20": float((last / c.iloc[-21] - 1) * 100), "ret60": float((last / c.iloc[-61] - 1) * 100),
+        "adx14": float(adx(d).iloc[-1]),
+        "macd_hist": float(hist_.iloc[-1]), "macd_turn_up": bool(hist_.iloc[-1] > hist_.iloc[-2] and hist_.iloc[-2] <= hist_.iloc[-3]),
+        "bbw_pct": float((bbw < bbw.iloc[-1]).mean() * 100) if len(bbw) > 50 else np.nan,
+        "nr7": bool(rng.iloc[-1] <= rng.tail(7).min()),
+        "inside_day": bool(h.iloc[-1] <= h.iloc[-2] and l.iloc[-1] >= l.iloc[-2]),
+        "updown_vol": float(up_v / dn_v) if dn_v else np.nan,
+        "sma50_slope": float((c.tail(50).mean() / c.iloc[-55:-5].mean() - 1) * 100),
+    })
     pm, pm_vol = premarket_last(intra, ny_today)
     row["pre_price"] = pm if pm is not None else np.nan
     row["gap_pct"] = (pm / last - 1) * 100 if pm is not None else 0.0
@@ -273,13 +306,182 @@ def hold_label(mins):
     return f"{days}+ days (swing)" if days > 1 else "full day"
 
 
+# ---------- statistics: backtest every setup on the last year ----------
+SHRINK_K = 15        # trades of "prior weight" pulling a ticker's own record toward the setup average
+MIN_SETUP_TRADES = 30
+
+
+def backtest_ticker(t, d, spy_up, hist5=None):
+    """Replay the same long rules on each past day, using only data known before that day plus
+    that day's open as the gap. With 5-minute bars (last ~60 days) each trade is walked bar by bar
+    exactly like the next-day results. Without them (demo), daily bars are used and a day touching
+    both stop and target counts as a loss."""
+    t5 = None
+    if hist5 is not None:
+        t5 = per_ticker(hist5, t)
+        if t5.empty:
+            return []
+        ix = t5.index.tz_convert("America/New_York") if t5.index.tz is not None else t5.index
+        t5 = t5.set_axis(ix)
+        days5 = set(ix.date)
+    d = d.dropna(subset=["Close"])
+    if len(d) < 80:
+        return []
+    c, h, l, o, v = d["Close"], d["High"], d["Low"], d["Open"], d["Volume"]
+    f = pd.DataFrame({
+        "prev_close": c.shift(), "prev_high": h.shift(), "prev_low": l.shift(),
+        "atr14": atr(d).shift(), "rsi14": rsi(c).shift(),
+        "sma20": c.rolling(20).mean().shift(), "sma50": c.rolling(50).mean().shift(),
+        "sma200": c.rolling(200).mean().shift(),
+        "high_20d": h.rolling(20).max().shift(), "low_20d": l.rolling(20).min().shift(),
+        "rel_vol_yday": (v / v.rolling(20).mean()).shift(),
+        "o": o, "h": h, "l": l, "c": c,
+    }).iloc[55:-1]          # skip warm-up; skip the last bar (today's plan, scored separately)
+    out = []
+    for ts, x in f.iterrows():
+        if x.isna()[["prev_close", "atr14", "sma50", "rsi14"]].any():
+            continue
+        r = x.to_dict()
+        r["px"] = x["o"]
+        r["gap_pct"] = (x["o"] / x["prev_close"] - 1) * 100
+        r["atr_pct"] = x["atr14"] / x["prev_close"] * 100
+        r["gap_atr"] = abs(r["gap_pct"]) / r["atr_pct"] if r["atr_pct"] else 0
+        setup, bias = classify(r)
+        if bias != "Long":
+            continue
+        r["setup"], r["bias"] = setup, bias
+        sd = STOP_ATR_MULT * x["atr14"]
+        trig = max(x["prev_high"], x["o"]) if setup.startswith(("Gap", "Breakout")) else x["o"]
+        stop, t1, t2 = trig - sd, trig + sd, trig + 2 * sd
+        tgt, _ = target_price(r, trig, t1, t2)
+        if t5 is not None:
+            if ts.date() not in days5:
+                continue
+            res = score_trade({"bias": "Long", "trigger": trig, "stop": stop, "target_price": tgt, "shares": 0},
+                              bars_for_day(t5, None, ts.date()))
+            if res["result"] in ("Target hit", "Stopped out", "Closed, target not hit"):
+                out.append({"ticker": t, "date": ts, "setup": setup, "r": res["r"],
+                            "spy_up": bool(spy_up.get(ts, True))})
+            continue
+        if x["h"] < trig:
+            continue                                   # never triggered: no trade
+        entry = max(trig, x["o"])
+        risk = entry - stop
+        if x["l"] <= stop:
+            rr = (stop - entry) / risk
+        elif x["h"] >= tgt:
+            rr = (tgt - entry) / risk
+        else:
+            rr = (x["c"] - entry) / risk
+        out.append({"ticker": t, "date": ts, "setup": setup, "r": rr,
+                    "spy_up": bool(spy_up.get(ts, True))})
+    return out
+
+
+def edge_stats(hist, ticker, setup, regime_up):
+    """Historical win rate and average R for this setup — in today's market regime where the
+    sample allows — blended with this ticker's own record (shrunk toward the setup average)."""
+    if hist.empty:
+        return dict(win=np.nan, edge=np.nan, n=0, n_tk=0)
+    g = hist[hist["setup"] == setup]
+    gr = g[g["spy_up"] == regime_up]
+    base = gr if len(gr) >= MIN_SETUP_TRADES else g
+    if len(base) < MIN_SETUP_TRADES:
+        return dict(win=np.nan, edge=np.nan, n=len(base), n_tk=0)
+    mu = base["r"].clip(-3, 5).mean()
+    tk = g[g["ticker"] == ticker]["r"].clip(-3, 5)
+    edge = (tk.sum() + SHRINK_K * mu) / (len(tk) + SHRINK_K)
+    win = ((tk > 0).sum() + SHRINK_K * (base["r"] > 0).mean()) / (len(tk) + SHRINK_K) * 100
+    return dict(win=win, edge=edge, n=len(base), n_tk=len(tk))
+
+
+def market_context(daily, df):
+    spy = per_ticker(daily, "SPY").dropna(subset=["Close"])
+    vix = per_ticker(daily, "^VIX").dropna(subset=["Close"])
+    c = spy["Close"]
+    up50 = float(c.iloc[-1]) > float(c.tail(50).mean())
+    up200 = float(c.iloc[-1]) > float(c.tail(200).mean())
+    vix_last = float(vix["Close"].iloc[-1]) if not vix.empty else np.nan
+    stocks = df[df["type"] == "Stock"]
+    breadth = float((stocks["prev_close"] > stocks["sma50"]).mean() * 100) if len(stocks) else np.nan
+    if up50 and up200 and (math.isnan(vix_last) or vix_last < 20):
+        regime, rscore = "Uptrend", 100
+    elif not up50 and not up200 or (not math.isnan(vix_last) and vix_last >= 28):
+        regime, rscore = "Risk-off", 0
+    else:
+        regime, rscore = "Mixed", 50
+    spy_ret20 = float((c.iloc[-1] / c.iloc[-21] - 1) * 100)
+    spy_up_series = (c > c.rolling(50).mean()).shift().dropna()
+    return dict(regime=regime, regime_score=rscore, spy_up=up50, vix=vix_last, breadth=breadth,
+                spy_ret20=spy_ret20, spy_up_series=spy_up_series)
+
+
+def signals(r, earn):
+    tags = []
+    if r.get("rs20", 0) > 2: tags.append(f"RS {r['rs20']:+.1f}% vs SPY (20d)")
+    if r.get("adx14", 0) >= 25: tags.append(f"ADX {r['adx14']:.0f} strong trend")
+    if r.get("bbw_pct", 100) <= 20: tags.append("volatility squeeze")
+    if r.get("nr7") or r.get("inside_day"): tags.append("NR7/inside day")
+    if r.get("macd_turn_up"): tags.append("MACD turning up")
+    if r.get("from_52w_high_pct", -99) > -3: tags.append("near 52-week high")
+    if r.get("rel_vol_yday", 0) >= 1.5: tags.append(f"volume {r['rel_vol_yday']:.1f}× avg")
+    if r.get("updown_vol", 1) >= 1.5: tags.append("accumulation")
+    if r.get("rsi14", 50) >= 70: tags.append(f"RSI {r['rsi14']:.0f} stretched")
+    if earn: tags.append(f"⚠ earnings {earn}")
+    return tags
+
+
+def earnings_soon(tickers, ny_today, days=3):
+    """Next earnings date if within `days` calendar days (yfinance calendar)."""
+    import yfinance as yf
+    out = {}
+    for t in tickers:
+        try:
+            cal = yf.Ticker(t).calendar
+            ed = cal.get("Earnings Date") if isinstance(cal, dict) else None
+            ed = ed[0] if isinstance(ed, (list, tuple)) and ed else ed
+            if ed is not None:
+                ed = pd.Timestamp(ed).date()
+                if 0 <= (ed - ny_today).days <= days:
+                    out[t] = f"{ed:%a %d %b}"
+        except Exception:
+            pass
+    return out
+
+
+def rank_longs(df, daily, ctx, ny_today, demo, hist5=None):
+    """Composite score for long setups: setup quality 35%, historical edge 35%,
+    relative strength 15%, market regime 15%. Only positive-edge setups are picked."""
+    hist = []
+    for t in df["ticker"]:
+        hist += backtest_ticker(t, per_ticker(daily, t), ctx["spy_up_series"], hist5)
+    hist = pd.DataFrame(hist)
+    df = df.copy()
+    df["rs20"] = df["ret20"] - ctx["spy_ret20"]
+    rs_rank = df["rs20"].rank(pct=True) * 100
+    stats = [edge_stats(hist, r["ticker"], r["setup"], ctx["spy_up"]) if r["bias"] == "Long"
+             else dict(win=np.nan, edge=np.nan, n=0, n_tk=0) for _, r in df.iterrows()]
+    st = pd.DataFrame(stats, index=df.index)
+    df[["hist_win", "hist_edge", "hist_n", "hist_n_tk"]] = st[["win", "edge", "n", "n_tk"]]
+    edge_pts = ((df["hist_edge"].fillna(-1) + 0.3) / 0.6).clip(0, 1) * 100
+    df["final"] = (0.35 * df["score"] + 0.35 * edge_pts + 0.15 * rs_rank + 0.15 * ctx["regime_score"]).round(0)
+    cand = df[(df["bias"] == "Long") & (df["hist_edge"] > 0)].sort_values("final", ascending=False).head(TOP_N + 3)
+    earn = {} if demo else earnings_soon(cand["ticker"].tolist(), ny_today)
+    df["earnings"] = df["ticker"].map(earn).fillna("")
+    df["why"] = [" · ".join(signals(r, r["earnings"])) for _, r in df.iterrows()]
+    # setup-level summary for the page
+    summary = (hist.groupby("setup")["r"].agg(trades="size", win=lambda x: (x > 0).mean() * 100, avg_r="mean")
+               .sort_values("avg_r", ascending=False).reset_index()) if not hist.empty else pd.DataFrame()
+    return df, summary
+
+
 def run(demo=False, extra=()):
     stocks = list(dict.fromkeys(STOCKS + [x for x in extra if x not in ETFS]))
     tickers = stocks + ETFS
     ny_now = pd.Timestamp.now(tz="America/New_York")
     ny_today = ny_now.date()
     print(f"Screening {len(stocks)} stocks + {len(ETFS)} ETFs at {ny_now:%a %d %b %Y %H:%M} New York time…")
-    daily, intraday, _ = (fetch_demo if demo else fetch_yahoo)(tickers)
+    daily, intraday, hist5 = (fetch_demo if demo else fetch_yahoo)(tickers + ["^VIX"])
 
     rows, skipped = [], []
     for t in tickers:
@@ -301,11 +503,14 @@ def run(demo=False, extra=()):
         rows.append(r)
 
     df = pd.DataFrame(rows).sort_values("score", ascending=False).reset_index(drop=True)
+    ctx = market_context(daily, df)
+    df, setup_stats = rank_longs(df, daily, ctx, ny_today, demo, hist5)
+    df = df.sort_values("final", ascending=False).reset_index(drop=True)
     has_pre = df["pre_price"].notna().sum()
     meta = dict(run_ny=f"{ny_now:%a %d %b %Y %H:%M} ET",
                 run_local=dt.datetime.now().strftime("%a %d %b %Y %H:%M"),
                 universe=len(tickers), passed=len(df), with_premarket=int(has_pre),
-                skipped=skipped, demo=demo)
+                skipped=skipped, demo=demo, ctx=ctx, setup_stats=setup_stats)
     return df, meta
 
 
@@ -333,6 +538,31 @@ def fmt(v, key):
     return f"{v:,.2f}"
 
 
+def method_html(meta):
+    st = meta.get("setup_stats")
+    rows = "" if st is None or st.empty else "".join(
+        f'<tr><td>{html.escape(r["setup"])}</td><td>{int(r["trades"])}</td><td>{r["win"]:.0f}%</td>'
+        f'<td class="{"pos" if r["avg_r"] > 0 else "neg"}">{r["avg_r"]:+.2f}R</td></tr>' for _, r in st.iterrows())
+    return f"""<details><summary>How picks are ranked</summary>
+<p><b>Score</b> = setup quality 35% (gap vs normal range, volume, liquidity, trend, not overstretched) + historical edge 35% + relative strength vs SPY 15% + market regime 15%. Only setups with a positive historical edge are shown.</p>
+<p><b>Win %</b> and <b>Edge</b> come from replaying the exact same rules (entry after 9:45am, stop, target, out by 3:55pm) on 5-minute bars for every stock in the list over the last ~60 trading days — in today's market regime where there are enough trades — blended with the ticker's own record. Edge is the average result in R (1R = the amount risked). Past results don't guarantee future ones.</p>
+<p><b>Why</b> tags: RS = return vs SPY over 20 days · ADX ≥ 25 = strong trend · squeeze = Bollinger width in its lowest 20% for the year · NR7/inside day = tight range before a move · accumulation = up-day volume ≥ 1.5× down-day volume · ⚠ earnings within 3 days.</p>
+<div class="wrap"><table><thead><tr><th>Long setup (past year, all tickers)</th><th>Trades</th><th>Win %</th><th>Avg R</th></tr></thead><tbody>{rows}</tbody></table></div>
+</details>"""
+
+
+def market_line(meta):
+    c = meta.get("ctx") or {}
+    if not c:
+        return ""
+    cls = {"Uptrend": "pos", "Risk-off": "neg"}.get(c["regime"], "")
+    vix = "" if math.isnan(c["vix"]) else f' · VIX {c["vix"]:.1f}'
+    warn = ('<p class="warn">Risk-off market: long setups have historically been weaker. '
+            'Consider smaller size or sitting out.</p>') if c["regime"] == "Risk-off" else ""
+    return (f'<p class="sub">Market <b class="{cls}">{c["regime"]}</b> (SPY vs 50/200-day){vix} · '
+            f'{c["breadth"]:.0f}% of stocks above 50-day avg</p>{warn}')
+
+
 def picks_table(df):
     """Top long picks. Shares, cost, risk $ and profit $ are filled in the browser from the
     reader's capital and risk % (saved in their browser), so they can change them."""
@@ -343,15 +573,17 @@ def picks_table(df):
         rows.append(
             f'<tr class="long" data-e="{e:.4f}" data-s="{st:.4f}" data-t="{tg:.4f}" data-l="{lim:.2f}">'
             f'<td>{html.escape(r["ticker"])}</td><td>{html.escape(r["trade"])}</td>'
-            f'<td data-v="{r["score"]}">{r["score"]:.0f}</td><td data-v="{r["px"]}">{r["px"]:,.2f}</td>'
+            f'<td>{r["final"]:.0f}</td><td>{r["hist_win"]:.0f}%</td><td>{r["hist_edge"]:+.2f}R</td>'
+            f'<td data-v="{r["px"]}">{r["px"]:,.2f}</td>'
             f'<td data-v="{r["gap_pct"]}" class="{"pos" if r["gap_pct"] > 0 else "neg" if r["gap_pct"] < 0 else ""}">{r["gap_pct"]:+.1f}</td>'
             f'<td>{e:,.2f}</td><td>{st:,.2f}</td><td>{tg:,.2f}</td><td>{r["target_pct"]:+.1f}</td>'
             f'<td>{html.escape(r["hold_target"])}</td>'
             f'<td class="sh">—</td><td class="cost">—</td><td class="risk neg">—</td><td class="prof pos">—</td></tr>'
-            f'<tr class="wb"><td></td><td colspan="13">Webull · Buy <b class="sh">—</b> {html.escape(r["ticker"])} · '
+            f'<tr class="wb"><td></td><td colspan="15"><span class="why">Why: {html.escape(r["why"] or "setup + edge")} · '
+            f'backtest {int(r["hist_n"])} similar trades{f", {int(r[chr(104)+"ist_n_tk"])} on this ticker" if r["hist_n_tk"] else ""}</span><br>Webull · Buy <b class="sh">—</b> {html.escape(r["ticker"])} · '
             f'Stop Limit: stop <b>{e:,.2f}</b>, limit <b>{lim:,.2f}</b> · Take-profit <b>{tg:,.2f}</b> · '
             f'Stop-loss <b>{st:,.2f}</b> · Day</td></tr>')
-    head = ("<th>Ticker</th><th>Trade</th><th>Score</th><th>Price</th><th>Gap %</th><th>Entry</th>"
+    head = ("<th>Ticker</th><th>Trade</th><th>Score</th><th>Win %</th><th>Edge</th><th>Price</th><th>Gap %</th><th>Entry</th>"
             "<th>Stop</th><th>Target</th><th>Gain %</th><th>Hold</th><th>Shares</th><th>Cost $</th>"
             "<th>Risk $</th><th>Profit $</th>")
     return f'<div class="wrap"><table id="picks"><thead><tr>{head}</tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
@@ -392,13 +624,13 @@ def save_plan(active, meta, hist_dir, ny_now):
     f = hist_dir / f"plan-{ny_now.date()}.csv"
     if f.exists():
         return f
-    cols = ["ticker", "trade", "bias", "score", "trigger", "stop", "target_price", "shares", "hold_mins"]
+    cols = ["ticker", "trade", "bias", "final", "hist_win", "hist_edge", "trigger", "stop", "target_price", "shares", "hold_mins"]
     active[cols].assign(planned_at=meta["run_ny"]).to_csv(f, index=False, float_format="%.4f")
     return f
 
 
 def bars_for_day(intra, t, day):
-    b = per_ticker(intra, t)
+    b = intra if t is None else per_ticker(intra, t)
     if b.empty:
         return b
     ix = b.index.tz_convert("America/New_York") if b.index.tz is not None else b.index
@@ -493,7 +725,8 @@ def results_html(day, res, hist_dir):
     if day is None:
         return '<h2>Previous day\'s results</h2><p class="note">Starts tomorrow: today\'s pre-10am plan is saved and scored after the close.</p>'
     order = {"Target hit": 0, "Closed, target not hit": 1, "Stopped out": 2, "No entry": 3, "No data": 4}
-    res = res.sort_values(by=["result", "score"], key=lambda c: c.map(order) if c.name == "result" else -c)
+    sc = "final" if "final" in res else "score"
+    res = res.sort_values(by=["result", sc], key=lambda c: c.map(order) if c.name == "result" else -c)
     traded = res[res["result"].isin(["Target hit", "Stopped out", "Closed, target not hit"])]
     n = lambda k: int((res["result"] == k).sum())
     net_r, net_usd = traded["r"].sum(), traded["pl_usd"].sum()
@@ -537,7 +770,7 @@ SHORT_SETUP = {"Gap & Go long": "Gap & Go", "Gap & Go short": "Gap & Go", "Gap u
 
 def top_longs(df, n=None):
     """The report's picks: highest-scoring long setups."""
-    return df[df["bias"] == "Long"].sort_values("score", ascending=False).head(n or TOP_N)
+    return df[(df["bias"] == "Long") & (df["hist_edge"] > 0)].sort_values("final", ascending=False).head(n or TOP_N)
 
 
 def trade_label(df):
@@ -587,7 +820,7 @@ h1{{font-size:24px;margin:0 0 4px}} h2{{font-size:16px;margin:28px 0 10px}}
 .kpi b{{display:block;font-size:20px}} .kpi span{{color:var(--mut);font-size:12px}}
 .bar{{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}}
 .bar button{{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:999px;padding:5px 12px;cursor:pointer}}
-.bar button.on{{background:var(--acc);border-color:var(--acc);color:#fff}} #cfg label{{color:var(--mut);font-size:13px;display:flex;gap:6px;align-items:center}} #cfg input{{width:110px}} tr.wb td{{font-size:12px;color:var(--mut);border-bottom:1px solid var(--line);padding-top:0;text-align:left;white-space:normal}} tr.wb b{{color:var(--fg);font-weight:600}} .bar input{{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 10px}}
+.bar button.on{{background:var(--acc);border-color:var(--acc);color:#fff}} #cfg label{{color:var(--mut);font-size:13px;display:flex;gap:6px;align-items:center}} #cfg input{{width:110px}} tr.wb td{{font-size:12px;color:var(--mut);border-bottom:1px solid var(--line);padding-top:0;text-align:left;white-space:normal}} tr.wb .why{{color:var(--fg)}} tr.wb b{{color:var(--fg);font-weight:600}} .bar input{{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 10px}}
 .wrap{{overflow-x:auto;border:1px solid var(--line);border-radius:10px}}
 table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;white-space:nowrap}}
 th,td{{padding:6px 8px;font-size:13px;border-bottom:1px solid var(--line);text-align:right}} th:nth-child(-n+2),td:nth-child(-n+2){{text-align:left}}
@@ -600,7 +833,7 @@ details{{margin-top:28px;color:var(--mut)}} details p,details li{{max-width:900p
 <p class="sub">Updated {meta['run_local']} MYT ({meta['run_ny']})</p>
 {demo_banner}{pm_note}
 <div class="tiles">{''.join(tile(t) for t in ['SPY','QQQ','IWM','UVXY'])}</div>
-<p class="sub">Market {tone}</p>
+{market_line(meta)}
 <div class="bar" id="cfg">
 <label>Capital (USD) <input id="cap" type="number" min="0" step="100" value="{ACCOUNT_SIZE_USD}"></label>
 <label>Risk per trade (%) <input id="rk" type="number" min="0.1" max="10" step="0.1" value="{RISK_PER_TRADE_PCT}"></label>
@@ -608,9 +841,10 @@ details{{margin-top:28px;color:var(--mut)}} details p,details li{{max-width:900p
 <span class="note" id="cfgsum"></span>
 </div>
 <h2>Top {TOP_N} long picks</h2>
-{picks_table(top_longs(df)) if len(top_longs(df)) else '<p class="note">No long setups today.</p>'}
+{picks_table(top_longs(df)) if len(top_longs(df)) else '<p class="note">No long setups with a positive historical edge today. Sitting out is a valid trade.</p>'}
 {results_block}
 <p class="note">P/L $ in results = R × your current risk per trade.</p>
+{method_html(meta)}
 <p class="note" id="rules"><b>Webull:</b> place an <b>OTOCO</b> (bracket) order — parent <b>Buy Stop Limit</b> at the stop/limit shown, child <b>Take-profit</b> limit sell at Target, child <b>Stop-loss</b> stop sell at Stop, time-in-force Day. Enter on a break of <b>Entry</b> after 9:45am ET. Exit at <b>Stop</b> or <b>Target</b>; if neither by the <b>Hold</b> time, consider cutting it. Close all by 3:55pm ET. Results assume exactly these rules, full position. Check news/earnings first. Not investment advice.</p>
 </main>
 <script>
@@ -676,10 +910,14 @@ def main():
         print(f"Could not score previous plan: {e}")
         block = ""
     html_path, csv_path = write_report(df, meta, Path(a.out).expanduser(), block)
+    c = meta["ctx"]
+    print(f"\nMarket: {c['regime']} · VIX {c['vix']:.1f} · breadth {c['breadth']:.0f}%")
+    if not meta["setup_stats"].empty:
+        print("Backtest (long setups, 5-min bars):\n" + meta["setup_stats"].round(2).to_string(index=False))
     top = top_longs(df)
     print("\nTop long picks:")
     for _, r in top.iterrows():
-        print(f"  {r['ticker']:<6} {r['bias']:<5} {r['setup']:<32} gap {r['gap_pct']:+.2f}%  score {r['score']:.0f}"
+        print(f"  {r['ticker']:<6} {r['bias']:<5} {r['setup']:<32} gap {r['gap_pct']:+.2f}%  score {r['final']:.0f} win {r['hist_win']:.0f}% edge {r['hist_edge']:+.2f}R"
               f"  entry {r['trigger']:.2f} target {r['target_price']:.2f} ({r['target_pct']:+.1f}%) hold {r['hold_target']}")
     if meta["skipped"]:
         print(f"\nSkipped {len(meta['skipped'])}: {', '.join(meta['skipped'][:15])}")
