@@ -333,6 +333,30 @@ def fmt(v, key):
     return f"{v:,.2f}"
 
 
+def picks_table(df):
+    """Top long picks. Shares, cost, risk $ and profit $ are filled in the browser from the
+    reader's capital and risk % (saved in their browser), so they can change them."""
+    rows = []
+    for _, r in df.iterrows():
+        e, st, tg = r["trigger"], r["stop"], r["target_price"]
+        lim = round(e + max(0.02, 0.1 * (e - st)), 2)   # limit a little above the stop-trigger
+        rows.append(
+            f'<tr class="long" data-e="{e:.4f}" data-s="{st:.4f}" data-t="{tg:.4f}" data-l="{lim:.2f}">'
+            f'<td>{html.escape(r["ticker"])}</td><td>{html.escape(r["trade"])}</td>'
+            f'<td data-v="{r["score"]}">{r["score"]:.0f}</td><td data-v="{r["px"]}">{r["px"]:,.2f}</td>'
+            f'<td data-v="{r["gap_pct"]}" class="{"pos" if r["gap_pct"] > 0 else "neg" if r["gap_pct"] < 0 else ""}">{r["gap_pct"]:+.1f}</td>'
+            f'<td>{e:,.2f}</td><td>{st:,.2f}</td><td>{tg:,.2f}</td><td>{r["target_pct"]:+.1f}</td>'
+            f'<td>{html.escape(r["hold_target"])}</td>'
+            f'<td class="sh">—</td><td class="cost">—</td><td class="risk neg">—</td><td class="prof pos">—</td></tr>'
+            f'<tr class="wb"><td></td><td colspan="13">Webull · Buy <b class="sh">—</b> {html.escape(r["ticker"])} · '
+            f'Stop Limit: stop <b>{e:,.2f}</b>, limit <b>{lim:,.2f}</b> · Take-profit <b>{tg:,.2f}</b> · '
+            f'Stop-loss <b>{st:,.2f}</b> · Day</td></tr>')
+    head = ("<th>Ticker</th><th>Trade</th><th>Score</th><th>Price</th><th>Gap %</th><th>Entry</th>"
+            "<th>Stop</th><th>Target</th><th>Gain %</th><th>Hold</th><th>Shares</th><th>Cost $</th>"
+            "<th>Risk $</th><th>Profit $</th>")
+    return f'<div class="wrap"><table id="picks"><thead><tr>{head}</tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
+
+
 def table(df, tid):
     head = "".join(f'<th data-k="{k}">{lbl}</th>' for k, lbl in COLS)
     body = []
@@ -477,7 +501,7 @@ def results_html(day, res, hist_dir):
     summary = (f'{len(traded)} triggered: <span class="pos">{n("Target hit")} target hit</span> · '
                f'{n("Closed, target not hit")} closed without target · <span class="neg">{n("Stopped out")} stopped</span> · '
                f'{n("No entry")} never triggered. Net <b class="{"pos" if net_r >= 0 else "neg"}">{net_r:+.1f}R '
-               f'(${net_usd:+,.0f})</b>, {wins}/{len(traded) or 0} winners.')
+               f'(<span class="usd" data-r="{net_r:.4f}">—</span>)</b>, {wins}/{len(traded) or 0} winners.')
     log = hist_dir / "results.csv"
     track = ""
     if log.exists():
@@ -487,7 +511,7 @@ def results_html(day, res, hist_dir):
         if days > 1 and len(allt):
             track = (f'<p class="sub">Track record, {days} days: {len(allt)} trades, '
                      f'{(allt["r"] > 0).mean() * 100:.0f}% winners, {(allt["result"] == "Target hit").mean() * 100:.0f}% hit target, '
-                     f'net {allt["r"].sum():+.1f}R (${allt["pl_usd"].sum():+,.0f}).</p>')
+                     f'net {allt["r"].sum():+.1f}R (<span class="usd" data-r="{allt["r"].sum():.4f}">—</span>).</p>')
     rows = []
     for _, r in res.iterrows():
         cls = {"Target hit": "pos", "Stopped out": "neg"}.get(r["result"], "")
@@ -496,10 +520,11 @@ def results_html(day, res, hist_dir):
                     f'<td>{fmtn(r["trigger"])}</td><td>{fmtn(r["target_price"])}</td>'
                     f'<td class="{cls}">{r["result"]}</td><td>{fmtn(r["exit"])}</td>'
                     f'<td class="{cls}">{fmtn(r["pl_pct"], "{:+.1f}%")}</td><td class="{cls}">{fmtn(r.get("r"), "{:+.1f}R")}</td>'
+                    f'<td class="{cls}">' + ("—" if pd.isna(r.get("r")) else f'<span class="usd" data-r="{r["r"]:.4f}">—</span>') + '</td>'
                     f'<td>{html.escape(r["when"] or "")}</td></tr>')
     return (f'<h2>Results — {day:%a %d %b} plan</h2><p class="sub">{summary}</p>{track}'
             '<div class="wrap"><table><thead><tr><th>Ticker</th><th>Trade</th><th>Entry</th><th>Target</th>'
-            '<th>Result</th><th>Exit</th><th>P/L</th><th>R</th><th>Timing</th></tr></thead>'
+            '<th>Result</th><th>Exit</th><th>P/L</th><th>R</th><th>P/L $</th><th>Timing</th></tr></thead>'
             f'<tbody>{"".join(rows)}</tbody></table></div>')
 
 
@@ -562,7 +587,7 @@ h1{{font-size:24px;margin:0 0 4px}} h2{{font-size:16px;margin:28px 0 10px}}
 .kpi b{{display:block;font-size:20px}} .kpi span{{color:var(--mut);font-size:12px}}
 .bar{{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}}
 .bar button{{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:999px;padding:5px 12px;cursor:pointer}}
-.bar button.on{{background:var(--acc);border-color:var(--acc);color:#fff}} .bar input{{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 10px}}
+.bar button.on{{background:var(--acc);border-color:var(--acc);color:#fff}} #cfg label{{color:var(--mut);font-size:13px;display:flex;gap:6px;align-items:center}} #cfg input{{width:110px}} tr.wb td{{font-size:12px;color:var(--mut);border-bottom:1px solid var(--line);padding-top:0;text-align:left;white-space:normal}} tr.wb b{{color:var(--fg);font-weight:600}} .bar input{{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 10px}}
 .wrap{{overflow-x:auto;border:1px solid var(--line);border-radius:10px}}
 table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;white-space:nowrap}}
 th,td{{padding:6px 8px;font-size:13px;border-bottom:1px solid var(--line);text-align:right}} th:nth-child(-n+2),td:nth-child(-n+2){{text-align:left}}
@@ -575,13 +600,40 @@ details{{margin-top:28px;color:var(--mut)}} details p,details li{{max-width:900p
 <p class="sub">Updated {meta['run_local']} MYT ({meta['run_ny']})</p>
 {demo_banner}{pm_note}
 <div class="tiles">{''.join(tile(t) for t in ['SPY','QQQ','IWM','UVXY'])}</div>
-<p class="sub">Market {tone} · size risks {RISK_PER_TRADE_PCT}% of ${ACCOUNT_SIZE_USD:,}</p>
+<p class="sub">Market {tone}</p>
+<div class="bar" id="cfg">
+<label>Capital (USD) <input id="cap" type="number" min="0" step="100" value="{ACCOUNT_SIZE_USD}"></label>
+<label>Risk per trade (%) <input id="rk" type="number" min="0.1" max="10" step="0.1" value="{RISK_PER_TRADE_PCT}"></label>
+<label>Max per position (% of capital) <input id="mx" type="number" min="5" max="100" step="5" value="20"></label>
+<span class="note" id="cfgsum"></span>
+</div>
 <h2>Top {TOP_N} long picks</h2>
-{table(top_longs(df), 'all') if len(top_longs(df)) else '<p class="note">No long setups today.</p>'}
+{picks_table(top_longs(df)) if len(top_longs(df)) else '<p class="note">No long setups today.</p>'}
 {results_block}
-<p class="note" id="rules">Enter on a break of <b>Entry</b> after 9:45am ET. Exit at <b>Stop</b> or <b>Target</b>; if neither by the <b>Hold</b> time, consider cutting it. Close all by 3:55pm ET. Results assume exactly these rules, full position. Check news/earnings first. Not investment advice.</p>
+<p class="note">P/L $ in results = R × your current risk per trade.</p>
+<p class="note" id="rules"><b>Webull:</b> place an <b>OTOCO</b> (bracket) order — parent <b>Buy Stop Limit</b> at the stop/limit shown, child <b>Take-profit</b> limit sell at Target, child <b>Stop-loss</b> stop sell at Stop, time-in-force Day. Enter on a break of <b>Entry</b> after 9:45am ET. Exit at <b>Stop</b> or <b>Target</b>; if neither by the <b>Hold</b> time, consider cutting it. Close all by 3:55pm ET. Results assume exactly these rules, full position. Check news/earnings first. Not investment advice.</p>
 </main>
 <script>
+(function(){{
+const $=id=>document.getElementById(id);const cap=$('cap'),rk=$('rk'),mx=$('mx');if(!cap)return;
+try{{const v=JSON.parse(localStorage.getItem('scr_cfg')||'{{}}');if(v.cap)cap.value=v.cap;if(v.rk)rk.value=v.rk;if(v.mx)mx.value=v.mx;}}catch(e){{}}
+const usd=x=>(x<0?'-':'')+'$'+Math.abs(x).toLocaleString(undefined,{{maximumFractionDigits:0}});
+function calc(){{
+ const C=+cap.value||0,R=(+rk.value||0)/100,M=(+mx.value||20)/100,riskUsd=C*R;
+ try{{localStorage.setItem('scr_cfg',JSON.stringify({{cap:cap.value,rk:rk.value,mx:mx.value}}))}}catch(e){{}}
+ $('cfgsum').textContent='Risk per trade: '+usd(riskUsd);
+ document.querySelectorAll('#picks tr.long').forEach(tr=>{{
+  const e=+tr.dataset.e,s=+tr.dataset.s,t=+tr.dataset.t,l=+tr.dataset.l,per=e-s;
+  let n=per>0?Math.floor(riskUsd/per):0;n=Math.max(0,Math.min(n,Math.floor(C*M/l)));
+  const wb=tr.nextElementSibling;
+  [tr,wb].forEach(x=>x.querySelectorAll('.sh').forEach(c=>c.textContent=n.toLocaleString()));
+  tr.querySelector('.cost').textContent=usd(n*e);tr.querySelector('.risk').textContent=usd(-n*per);
+  tr.querySelector('.prof').textContent=usd(n*(t-e));
+ }});
+ document.querySelectorAll('.usd').forEach(x=>{{const v=(+x.dataset.r)*riskUsd;x.textContent=(v>=0?'+':'')+usd(v);}});
+}}
+[cap,rk,mx].forEach(i=>i.addEventListener('input',calc));calc();
+}})();
 function sortBy(th){{const t=th.closest('table'),i=[...th.parentNode.children].indexOf(th),b=t.tBodies[0];
 const asc=th.dataset.dir!=='asc';th.parentNode.querySelectorAll('th').forEach(x=>delete x.dataset.dir);th.dataset.dir=asc?'asc':'desc';
 [...b.rows].sort((a,c)=>{{const A=a.cells[i],C=c.cells[i];const x=A.dataset.v,y=C.dataset.v;
