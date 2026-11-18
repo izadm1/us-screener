@@ -1,0 +1,4 @@
+ticker,trade,bias,final,hist_win,hist_edge,trigger,stop,target_price,shares,hold_mins,planned_at
+AAPL,Long · Trend pullback,Long,59.0000,55.2809,0.1112,351.3800,347.4410,355.3600,31,106.5190,Wed 18 Nov 2026 08:57 ET
+ABBV,Long · Trend pullback,Long,56.0000,48.5152,0.0720,291.0000,287.6724,297.6553,37,342.9688,Wed 18 Nov 2026 08:57 ET
+PYPL,Long · Trend pullback,Long,54.0000,53.2459,0.0230,57.7500,57.0041,59.1900,167,283.2345,Wed 18 Nov 2026 08:57 ET
