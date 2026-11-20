@@ -1,0 +1,5 @@
+ticker,trade,bias,final,hist_win,hist_edge,trigger,stop,target_price,shares,hold_mins,planned_at
+SQQQ,Long · Gap & Go (ETF),Long,64.0000,45.2857,0.1134,51.7185,50.1316,54.8924,78,171.7480,Fri 20 Nov 2026 08:58 ET
+SPXS,Long · Gap & Go (ETF),Long,59.0000,51.7857,0.0674,30.4300,29.8072,31.6757,200,187.0949,Fri 20 Nov 2026 08:58 ET
+SOXS,Long · Gap & Go (ETF),Long,55.0000,51.2363,0.0283,67.7000,63.2672,76.5657,28,244.4600,Fri 20 Nov 2026 08:58 ET
+AAPL,Long · Trend pullback,Long,46.0000,51.6981,0.0349,349.2700,345.3949,355.2800,32,254.2201,Fri 20 Nov 2026 08:58 ET
