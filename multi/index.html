@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multi-Asset Screener — Stocks · ETFs · Indices · Crypto</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="vendor/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="logo">◆</span>
+    <div>
+      <h1>Multi-Asset Screener</h1>
+      <p class="sub">Stocks · ETFs · Indices · Crypto — <span id="updated">loading…</span></p>
+    </div>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button data-cls="stocks" class="on">Stocks</button>
+    <button data-cls="etfs">ETFs</button>
+    <button data-cls="indices">Indices</button>
+    <button data-cls="crypto">Crypto</button>
+    <button data-cls="method">Method</button>
+  </nav>
+</header>
+
+<section class="regime" id="regime"></section>
+
+<main id="screen">
+  <section class="controls">
+    <div class="presets" id="presets"></div>
+    <div class="filters">
+      <input id="q" type="search" placeholder="Search symbol or name">
+      <label>Min score <input id="minScore" type="range" min="0" max="100" value="0"><b id="minScoreV">0</b></label>
+      <label>RSI <input id="rsiMin" type="number" min="0" max="100" value="0"> – <input id="rsiMax" type="number" min="0" max="100" value="100"></label>
+      <select id="sig"><option value="">Any signal</option></select>
+      <label class="chk"><input id="upOnly" type="checkbox"> Above 200 EMA</label>
+      <label class="chk"><input id="noExt" type="checkbox"> Hide overextended</label>
+      <span class="count" id="count"></span>
+    </div>
+  </section>
+  <div class="tablewrap">
+    <table id="tbl"><thead></thead><tbody></tbody></table>
+  </div>
+  <p class="foot">Scores are relative rankings for research, not buy/sell advice. Daily bars; intraday moves are not reflected until the next data refresh.</p>
+</main>
+
+<main id="method" hidden></main>
+
+<aside class="drawer" id="drawer" hidden>
+  <div class="drawer-inner">
+    <button class="close" id="closeDrawer" aria-label="Close">✕</button>
+    <div id="dHead"></div>
+    <div id="chart" class="chart"></div>
+    <div id="rsiChart" class="chart small"></div>
+    <div id="dBody"></div>
+  </div>
+</aside>
+
+<script src="app.js"></script>
+</body>
+</html>

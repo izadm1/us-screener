@@ -7,6 +7,9 @@ on:
     # Refresh every hour while the US market is open (≈ 22:15–05:15 Malaysia).
     - cron: "15 14-20 * * 1-5"
   workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths: ["multi/**", ".github/workflows/screener.yml"]
 
 permissions:
   contents: write
@@ -33,11 +36,18 @@ jobs:
         run: |
           python us_screener.py --no-open --out site
           cp site/latest.html site/index.html
+      - name: Build multi-asset screener (stocks, ETFs, indices, crypto)
+        continue-on-error: true
+        run: |
+          python multi/scripts/build_data.py
+          mkdir -p site/multi
+          cp -r multi/index.html multi/app.js multi/style.css multi/vendor multi/data site/multi/
+          touch site/.nojekyll
       - name: Save plan and results history
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add history
+          git add history; git add multi/data/fundamentals.json 2>/dev/null || true
           git diff --cached --quiet || (git commit -m "History $(date -u +%F)" && git push)
       - uses: actions/upload-pages-artifact@v3
         with:
