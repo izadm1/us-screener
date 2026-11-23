@@ -389,9 +389,9 @@ def write_history(sym, x):
 
 def build(frames=None, fundamentals=None, sentiment=None):
     os.makedirs(HIST, exist_ok=True)
-    classes = {"stocks": U.STOCKS, "etfs": U.ETFS, "indices": list(U.INDICES), "crypto": U.CRYPTO}
+    classes = {"stocks": U.STOCKS, "etfs": U.ETFS, "indices": list(U.INDICES), "crypto": U.CRYPTO, "forex": list(U.FOREX)}
     if frames is None:
-        all_syms = sum(classes.values(), []) + list(U.MACRO) + list(U.BENCH.values())
+        all_syms = sum(classes.values(), []) + list(U.MACRO) + [b for b in U.BENCH.values() if b]
         frames = download(all_syms)
     if fundamentals is None:
         fundamentals = load_fundamentals(U.STOCKS, U.ETFS)
@@ -400,7 +400,7 @@ def build(frames=None, fundamentals=None, sentiment=None):
 
     result = {"generated": datetime.now(timezone.utc).isoformat(timespec="minutes"), "classes": {}}
     for cls, syms in classes.items():
-        bench = frames.get(U.BENCH[cls])
+        bench = frames.get(U.BENCH.get(cls)) if U.BENCH.get(cls) else None
         bench_r63 = ret(bench["Close"], 63) if bench is not None else None
         rows = []
         for s in syms:
@@ -415,6 +415,8 @@ def build(frames=None, fundamentals=None, sentiment=None):
             meta = fundamentals.get(s, {})
             if cls == "indices":
                 f["name"] = U.INDICES[s]
+            elif cls == "forex":
+                f["label"], f["name"], f["group"] = U.FOREX[s]
             elif cls == "crypto":
                 f["name"] = s.split("-")[0].rstrip("0123456789")
             else:

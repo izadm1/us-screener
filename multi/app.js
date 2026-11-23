@@ -39,8 +39,9 @@ function fcAt(fc, h) {
 const fcFor = (r) => r.fc ? fcAt(r.fc, barsBetween(r.fc.asof, S.fdate, r.fc.calendar)) : null;
 const nextTurn = (r) => (r.fc && r.fc.turns && r.fc.turns[0]) || null;
 
+const disp = (r) => r.label || r.sym.replace(/\d{3,}-USD$/, "-USD");
 const fmt = {
-  px: (v) => v == null ? "–" : v >= 1000 ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : v >= 1 ? v.toFixed(2) : v.toPrecision(4),
+  px: (v) => v == null ? "–" : v >= 1000 ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : v >= 20 ? v.toFixed(2) : v >= 10 ? v.toFixed(3) : v >= 1 ? v.toFixed(4) : v.toPrecision(4),
   pct: (v, d = 1) => v == null ? "–" : (v > 0 ? "+" : "") + (v * 100).toFixed(d) + "%",
   n: (v, d = 1) => v == null ? "–" : Number(v).toFixed(d),
 };
@@ -62,7 +63,7 @@ const PRESETS = {
 };
 
 const COLS = [
-  { k: "sym", t: "Symbol", f: (r) => `<span class="sym">${r.sym.replace(/\d{3,}-USD$/, "-USD")}</span><span class="nm">${r.name || ""}</span>` },
+  { k: "sym", t: "Symbol", f: (r) => `<span class="sym">${disp(r)}</span><span class="nm">${r.name || ""}${r.group ? " · " + r.group : ""}</span>` },
   { k: "price", t: "Price", f: (r) => fmt.px(r.price) },
   { k: "chg1d", t: "1D", f: (r) => `<span class="${cls(r.chg1d)}">${fmt.pct(r.chg1d)}</span>` },
   { k: "fmed", t: "Est. price", v: "forecast", f: (r) => r._f ? `<b>${fmt.px(r._f.med)}</b>` : "–" },
@@ -338,7 +339,7 @@ function reasons(r, H, pc) {
   return out.slice(0, 3);
 }
 function topPicks(H) {
-  const classes = PK.universe === "tradeable" ? ["stocks", "etfs", "crypto"] : [PK.universe];
+  const classes = PK.universe === "tradeable" ? ["stocks", "etfs", "crypto"] : PK.universe === "all" ? ["stocks", "etfs", "crypto", "forex"] : [PK.universe];
   const cands = [];
   classes.forEach((c) => (S.data.classes[c] || []).forEach((r) => {
     const sig = r.signals || [];
@@ -361,8 +362,8 @@ function renderPicks() {
   let warn = "";
   if (eq === "Risk-off" || cr === "Risk-off") warn = `<div class="pkwarn">⚠ Market backdrop: equities <b>${eq || "–"}</b>, crypto <b>${cr || "–"}</b>. In risk-off conditions even the best-ranked longs fail more often — consider smaller size or waiting.</div>`;
   let h = `<div class="pkhead"><div><h2>Top 5 picks by holding period</h2><p class="note">Ranked from today's data (${new Date(S.data.generated).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}). Only assets in an uptrend, not in distress; short horizons also skip overextended moves. Click any pick for its chart and forecast.</p></div>
-    <label class="pkuni">Universe <select id="pkUni">${[["tradeable", "Stocks + ETFs + Crypto"], ["stocks", "Stocks"], ["etfs", "ETFs"], ["crypto", "Crypto"], ["indices", "Indices"]].map(([v, l]) => `<option value="${v}" ${PK.universe === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>${warn}<div class="pkgrid">`;
-  const clsLabel = { stocks: "Stock", etfs: "ETF", crypto: "Crypto", indices: "Index" };
+    <label class="pkuni">Universe <select id="pkUni">${[["tradeable", "Stocks + ETFs + Crypto"], ["all", "Everything incl. Forex"], ["stocks", "Stocks"], ["etfs", "ETFs"], ["crypto", "Crypto"], ["forex", "Forex"], ["indices", "Indices"]].map(([v, l]) => `<option value="${v}" ${PK.universe === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>${warn}<div class="pkgrid">`;
+  const clsLabel = { stocks: "Stock", etfs: "ETF", crypto: "Crypto", indices: "Index", forex: "Forex" };
   HORIZONS.forEach((H) => {
     const picks = topPicks(H);
     h += `<section class="pkcard"><div class="pkt"><h3>${H.t}</h3><span>${H.sub}</span></div>`;
@@ -373,7 +374,7 @@ function renderPicks() {
       h += `<div class="pk" data-s="${r.sym}">
         <div class="pkrank">${i + 1}</div>
         <div class="pkmain">
-          <div class="pkline"><span class="sym">${r.sym.replace(/\d{3,}-USD$/, "-USD")}</span><span class="chip">${clsLabel[r._cls]}</span><span class="pkname">${r.name || ""}</span></div>
+          <div class="pkline"><span class="sym">${disp(r)}</span><span class="chip">${clsLabel[r._cls]}</span><span class="pkname">${r.name || ""}</span></div>
           <div class="pkline mono"><span>${fmt.px(r.price)}</span>${f ? `<span class="mute">→ ${tgt}</span><b>${fmt.px(f.med)}</b><span class="${cls(f.chg)}">${fmt.pct(f.chg)}</span><span class="mute">80%: ${fmt.px(f.lo80)}–${fmt.px(f.hi80)}</span>` : ""}</div>
           <div class="chips">${reasons(r, H, p.pc).map((x) => `<span class="chip g">${x}</span>`).join("")}</div>
         </div>
@@ -382,7 +383,7 @@ function renderPicks() {
     });
     h += `</section>`;
   });
-  h += `</div><p class="note">How each list is ranked: <b>Daily/Weekly</b> favour entry timing (pullbacks in uptrends, oversold RSI(2)), trend, volume, short-range forecast odds and the asset's past forecast hit rate; Weekly also rewards a strong cycle low that is due. <b>Monthly</b> blends the composite score, momentum, forecast odds, hit rate and relative strength. <b>3/6/12 months</b> lean on medium-term momentum, trend, relative strength and (for stocks) Piotroski/Altman quality; leveraged/inverse ETFs are excluded from Monthly and longer lists because they decay over long holds. These are rankings, not guarantees — the further out, the wider the range.</p>`;
+  h += `</div><p class="note">${PK.universe === "forex" || PK.universe === "all" ? "Forex picks are <b>buy the first currency</b> of the pair (e.g. EUR/USD = buy euro, sell dollar). " : ""}How each list is ranked: <b>Daily/Weekly</b> favour entry timing (pullbacks in uptrends, oversold RSI(2)), trend, volume, short-range forecast odds and the asset's past forecast hit rate; Weekly also rewards a strong cycle low that is due. <b>Monthly</b> blends the composite score, momentum, forecast odds, hit rate and relative strength. <b>3/6/12 months</b> lean on medium-term momentum, trend, relative strength and (for stocks) Piotroski/Altman quality; leveraged/inverse ETFs are excluded from Monthly and longer lists because they decay over long holds. These are rankings, not guarantees — the further out, the wider the range.</p>`;
   $("picks").innerHTML = h;
   $("pkUni").onchange = (e) => { PK.universe = e.target.value; renderPicks(); };
   $("picks").querySelectorAll(".pk").forEach((el) => (el.onclick = () => openDetail(el.dataset.s)));
@@ -397,7 +398,7 @@ async function openDetail(sym, keepScroll) {
   $("drawer").hidden = false;
   const b = r.buckets || {};
   const bk = (k, l) => b[k] == null ? "" : `<div class="bk"><div class="l">${l}</div><div class="v ${b[k] >= 70 ? "up" : b[k] < 40 ? "down" : ""}">${b[k]}</div></div>`;
-  $("dHead").innerHTML = `<div class="dh"><h2>${r.sym} <span class="px">${fmt.px(r.price)}</span> <span class="${cls(r.chg1d)}" style="font:500 15px var(--mono)">${fmt.pct(r.chg1d, 2)}</span></h2>
+  $("dHead").innerHTML = `<div class="dh"><h2>${disp(r)} <span class="px">${fmt.px(r.price)}</span> <span class="${cls(r.chg1d)}" style="font:500 15px var(--mono)">${fmt.pct(r.chg1d, 2)}</span></h2>
     <p>${r.name || ""}${r.sector ? " · " + r.sector : ""} · bar date ${r.date}</p>
     <div class="chips">${(r.signals || []).map((s) => `<span class="chip ${chipColor[s] || ""}">${s}</span>`).join("")}</div>
     <div class="buckets"><div class="bk"><div class="l">Composite</div><div class="v">${r.score == null ? "–" : r.score.toFixed(0)}</div></div>
@@ -545,7 +546,7 @@ async function drawTV(sym) {
   if (!r) return;
   TV.sym = sym;
   document.querySelectorAll("#tbl tbody tr").forEach((tr) => tr.classList.toggle("sel", tr.dataset.s === sym));
-  $("tvSym").textContent = sym.replace(/\d{3,}-USD$/, "-USD");
+  $("tvSym").textContent = disp(r);
   $("tvName").textContent = r.name || "";
   let h;
   try { h = await (await fetch(`data/history/${safe(sym)}.json`)).json(); } catch (e) { $("tvMain").textContent = "No chart data"; return; }
@@ -717,7 +718,7 @@ const METHOD = `
 <tr><td><strong>Entry timing</strong> (10%)</td><td>RSI(14), RSI(2), Bollinger σ-zone (z-score vs 20-day mean)</td><td>Buying short-term pullbacks <em>inside</em> long-term uptrends (e.g. RSI(2) &lt; 10 above the 200-day) has a long record on equity indices; heavily stretched moves (&gt;2σ, RSI &gt; 75) are penalised.</td></tr>
 <tr><td><strong>Quality</strong> (10%, stocks only)</td><td>Piotroski F-score, Altman Z-score (distress cap)</td><td>F-score separates strong from weak balance sheets; Altman Z flags bankruptcy risk (not applied to banks/insurers).</td></tr>
 </table>
-<p>A bucket with no data (e.g. volume on some indices, quality on ETFs) is dropped and the weights re-normalised. Market regime (S&amp;P 500 vs 200-day EMA, VIX, DXY, 10Y yield, gold; BTC trend, Fear &amp; Greed, BTC dominance) is shown on top as context rather than mixed into individual scores.</p>
+<p>A bucket with no data (e.g. volume on some indices, quality on ETFs) is dropped and the weights re-normalised. <b>Forex</b> has no real volume (it trades over the counter) and no single benchmark, so forex pairs are scored on trend, momentum (ranked against the other pairs), entry timing and the price forecast; a high score means the <em>first</em> currency is strengthening. Gold and silver use front-month futures as a proxy for XAU/USD and XAG/USD. Market regime (S&amp;P 500 vs 200-day EMA, VIX, DXY, 10Y yield, gold; BTC trend, Fear &amp; Greed, BTC dominance) is shown on top as context rather than mixed into individual scores.</p>
 <h2>What was kept and dropped from the ELCARO list</h2>
 <table><tr><th>Indicator</th><th>Decision</th><th>Reason</th></tr>
 <tr><td>EMA</td><td class="keep">Kept</td><td>Trend backbone (20/50/200).</td></tr>

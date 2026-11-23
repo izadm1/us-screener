@@ -57,4 +57,55 @@ MACRO = {
     "^TNX": "US 10Y yield", "GC=F": "Gold", "CL=F": "WTI Crude", "BTC-USD": "Bitcoin",
 }
 
-BENCH = {"stocks": "SPY", "etfs": "SPY", "indices": "^GSPC", "crypto": "BTC-USD"}
+BENCH = {"stocks": "SPY", "etfs": "SPY", "indices": "^GSPC", "crypto": "BTC-USD", "forex": None}
+
+# Forex: Yahoo ticker -> (display pair, description, group)
+FOREX = {
+    # Majors
+    "EURUSD=X": ("EUR/USD", "Euro / US Dollar", "Major"),
+    "USDJPY=X": ("USD/JPY", "US Dollar / Japanese Yen", "Major"),
+    "GBPUSD=X": ("GBP/USD", "British Pound / US Dollar", "Major"),
+    "USDCHF=X": ("USD/CHF", "US Dollar / Swiss Franc", "Major"),
+    "AUDUSD=X": ("AUD/USD", "Australian Dollar / US Dollar", "Major"),
+    "USDCAD=X": ("USD/CAD", "US Dollar / Canadian Dollar", "Major"),
+    "NZDUSD=X": ("NZD/USD", "New Zealand Dollar / US Dollar", "Major"),
+    # Popular crosses
+    "EURGBP=X": ("EUR/GBP", "Euro / British Pound", "Cross"),
+    "EURJPY=X": ("EUR/JPY", "Euro / Japanese Yen", "Cross"),
+    "GBPJPY=X": ("GBP/JPY", "British Pound / Japanese Yen", "Cross"),
+    "EURCHF=X": ("EUR/CHF", "Euro / Swiss Franc", "Cross"),
+    "EURAUD=X": ("EUR/AUD", "Euro / Australian Dollar", "Cross"),
+    "EURCAD=X": ("EUR/CAD", "Euro / Canadian Dollar", "Cross"),
+    "EURNZD=X": ("EUR/NZD", "Euro / New Zealand Dollar", "Cross"),
+    "GBPCHF=X": ("GBP/CHF", "British Pound / Swiss Franc", "Cross"),
+    "GBPAUD=X": ("GBP/AUD", "British Pound / Australian Dollar", "Cross"),
+    "GBPCAD=X": ("GBP/CAD", "British Pound / Canadian Dollar", "Cross"),
+    "GBPNZD=X": ("GBP/NZD", "British Pound / New Zealand Dollar", "Cross"),
+    "AUDJPY=X": ("AUD/JPY", "Australian Dollar / Japanese Yen", "Cross"),
+    "AUDNZD=X": ("AUD/NZD", "Australian Dollar / New Zealand Dollar", "Cross"),
+    "AUDCAD=X": ("AUD/CAD", "Australian Dollar / Canadian Dollar", "Cross"),
+    "AUDCHF=X": ("AUD/CHF", "Australian Dollar / Swiss Franc", "Cross"),
+    "CADJPY=X": ("CAD/JPY", "Canadian Dollar / Japanese Yen", "Cross"),
+    "CHFJPY=X": ("CHF/JPY", "Swiss Franc / Japanese Yen", "Cross"),
+    "NZDJPY=X": ("NZD/JPY", "New Zealand Dollar / Japanese Yen", "Cross"),
+    "CADCHF=X": ("CAD/CHF", "Canadian Dollar / Swiss Franc", "Cross"),
+    # Asia & emerging markets
+    "MYR=X": ("USD/MYR", "US Dollar / Malaysian Ringgit", "Asia & EM"),
+    "SGD=X": ("USD/SGD", "US Dollar / Singapore Dollar", "Asia & EM"),
+    "HKD=X": ("USD/HKD", "US Dollar / Hong Kong Dollar", "Asia & EM"),
+    "CNH=X": ("USD/CNH", "US Dollar / Chinese Yuan (offshore)", "Asia & EM"),
+    "THB=X": ("USD/THB", "US Dollar / Thai Baht", "Asia & EM"),
+    "IDR=X": ("USD/IDR", "US Dollar / Indonesian Rupiah", "Asia & EM"),
+    "INR=X": ("USD/INR", "US Dollar / Indian Rupee", "Asia & EM"),
+    "KRW=X": ("USD/KRW", "US Dollar / South Korean Won", "Asia & EM"),
+    "PHP=X": ("USD/PHP", "US Dollar / Philippine Peso", "Asia & EM"),
+    "SGDMYR=X": ("SGD/MYR", "Singapore Dollar / Malaysian Ringgit", "Asia & EM"),
+    "ZAR=X": ("USD/ZAR", "US Dollar / South African Rand", "Asia & EM"),
+    "MXN=X": ("USD/MXN", "US Dollar / Mexican Peso", "Asia & EM"),
+    "TRY=X": ("USD/TRY", "US Dollar / Turkish Lira", "Asia & EM"),
+    "SEK=X": ("USD/SEK", "US Dollar / Swedish Krona", "Asia & EM"),
+    "NOK=X": ("USD/NOK", "US Dollar / Norwegian Krone", "Asia & EM"),
+    # Metals as traded on FX platforms (Yahoo has no clean spot feed: futures used as proxy)
+    "GC=F": ("XAU/USD", "Gold (front-month futures proxy)", "Metals"),
+    "SI=F": ("XAG/USD", "Silver (front-month futures proxy)", "Metals"),
+}
