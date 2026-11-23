@@ -136,6 +136,7 @@ async function load() {
     $("screen").innerHTML = `<div class="err">Could not load <code>data/screener.json</code>. Run the "Update screener data" GitHub Action (or <code>python scripts/build_data.py</code>) first.</div>`;
     return;
   }
+  Object.entries(S.data.classes).forEach(([c, list]) => list.forEach((x) => (x._cls = c)));
   const g = new Date(S.data.generated);
   $("updated").textContent = "data as of " + g.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
   renderRegime();
@@ -278,17 +279,119 @@ $("tabs").onclick = (e) => {
   const b = e.target.closest("button"); if (!b) return;
   [...$("tabs").children].forEach((x) => x.classList.toggle("on", x === b));
   S.cls = b.dataset.cls;
-  const m = S.cls === "method";
-  $("screen").hidden = m; $("method").hidden = !m;
+  const m = S.cls === "method", pk = S.cls === "picks";
+  $("screen").hidden = m || pk; $("method").hidden = !m; $("picks").hidden = !pk;
+  $("regime").hidden = m;
   if (m) { $("method").innerHTML = METHOD; return; }
+  if (pk) { renderPicks(); return; }
   render();
   syncTV();
 };
 
+function findRow(sym) {
+  const here = (S.data.classes[S.cls] || []).find((x) => x.sym === sym);
+  if (here) return here;
+  for (const list of Object.values(S.data.classes)) { const x = list.find((y) => y.sym === sym); if (x) return x; }
+  return null;
+}
+
+/* ---------------- top picks ---------------- */
+const LEVERAGED = new Set(["TQQQ", "SQQQ", "SOXL", "SOXS", "UVXY"]);
+const HORIZONS = [
+  { id: "d", t: "Daily", sub: "next trading day", h: 1, w: { timing: .30, trend: .25, volume: .15, pup: .15, acc: .15 }, noExt: true },
+  { id: "w", t: "Weekly", sub: "next 5 trading days", h: 5, w: { timing: .25, trend: .25, momentum: .15, pup: .15, acc: .10, cycle: .10 }, noExt: true },
+  { id: "m", t: "Monthly", sub: "next ~1 month", h: 21, w: { score: .30, momentum: .20, pup: .20, acc: .15, relstr: .15 }, longOnly: true },
+  { id: "q", t: "3 Months", sub: "next ~3 months", h: 63, w: { momentum: .35, trend: .25, relstr: .20, qual: .20 }, longOnly: true },
+  { id: "h", t: "6 Months", sub: "next ~6 months", h: 126, w: { momentum: .35, trend: .25, relstr: .15, qual: .25 }, longOnly: true },
+  { id: "y", t: "12 Months", sub: "next ~12 months", h: 252, w: { momentum: .30, trend: .25, relstr: .15, qual: .30 }, longOnly: true },
+];
+const PK = { universe: "tradeable" };
+function pickComponents(r, H) {
+  const b = r.buckets || {}, fc = r.fc;
+  const steps = fc ? (fc.calendar ? Math.round(H.h * 365 / 252) : H.h) : H.h;
+  const f = fc ? fcAt(fc, steps) : null;
+  const t = nextTurn(r);
+  const cyc = fc && fc.cycle && fc.cycle.strength >= 0.3 && t ? (t.type === "trough" && t.bars <= Math.max(3, H.h) ? 100 : t.type === "peak" && t.bars <= Math.max(3, H.h) ? 0 : 50) : 50;
+  return {
+    f, steps,
+    c: {
+      timing: b.timing, trend: b.trend, volume: b.volume, momentum: b.momentum, relstr: b.relstr,
+      score: r.score, qual: b.quality ?? r.score,
+      pup: f ? Math.max(0, Math.min(100, (f.pup - 0.5) * 400 + 50)) : null,
+      acc: fc && fc.acc ? Math.max(0, Math.min(100, (fc.acc.dir - 0.5) * 500 + 50)) : null,
+      cycle: cyc,
+    },
+  };
+}
+function reasons(r, H, pc) {
+  const out = [], b = r.buckets || {};
+  if (H.h <= 5 && (r.signals || []).includes("Pullback in uptrend")) out.push("Pullback in uptrend");
+  if (H.h <= 5 && (r.signals || []).includes("RSI(2) oversold")) out.push("Short-term oversold");
+  if (H.h <= 5 && (r.signals || []).includes("Breakout")) out.push("Breakout on volume");
+  if (pc.c.cycle === 100) out.push("Cycle low due");
+  if ((b.trend ?? 0) >= 85) out.push("Strong uptrend");
+  if ((b.momentum ?? 0) >= 80) out.push("Top momentum");
+  if ((b.relstr ?? 0) >= 80) out.push("Beating benchmark");
+  if (r.fscore != null && r.fscore >= 7 && H.h >= 21) out.push(`F-score ${r.fscore}/9`);
+  if (r.fc && r.fc.acc && r.fc.acc.dir >= 0.6) out.push(`${Math.round(r.fc.acc.dir * 100)}% past hit rate`);
+  if (pc.f && pc.f.pup >= 0.6) out.push(`${Math.round(pc.f.pup * 100)}% chance higher`);
+  return out.slice(0, 3);
+}
+function topPicks(H) {
+  const classes = PK.universe === "tradeable" ? ["stocks", "etfs", "crypto"] : [PK.universe];
+  const cands = [];
+  classes.forEach((c) => (S.data.classes[c] || []).forEach((r) => {
+    const sig = r.signals || [];
+    if (r.sym === "^VIX" || sig.includes("Downtrend") || sig.includes("Distress risk")) return;
+    if (H.noExt && sig.includes("Overextended")) return;
+    if (H.longOnly && LEVERAGED.has(r.sym)) return;
+    if (!(r.above200 || (r.above200 == null && r.st_dir === 1))) return;
+    const pc = pickComponents(r, H);
+    let num = 0, den = 0;
+    for (const [k, w] of Object.entries(H.w)) { const v = pc.c[k]; if (v != null && !Number.isNaN(v)) { num += w * v; den += w; } }
+    if (!den) return;
+    cands.push({ r, pc, ps: num / den });
+  }));
+  cands.sort((a, b) => b.ps - a.ps);
+  return cands.slice(0, 5);
+}
+function renderPicks() {
+  const reg = S.data.regime || {};
+  const eq = reg.equity ? reg.equity[0] : null, cr = reg.crypto ? reg.crypto[0] : null;
+  let warn = "";
+  if (eq === "Risk-off" || cr === "Risk-off") warn = `<div class="pkwarn">⚠ Market backdrop: equities <b>${eq || "–"}</b>, crypto <b>${cr || "–"}</b>. In risk-off conditions even the best-ranked longs fail more often — consider smaller size or waiting.</div>`;
+  let h = `<div class="pkhead"><div><h2>Top 5 picks by holding period</h2><p class="note">Ranked from today's data (${new Date(S.data.generated).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}). Only assets in an uptrend, not in distress; short horizons also skip overextended moves. Click any pick for its chart and forecast.</p></div>
+    <label class="pkuni">Universe <select id="pkUni">${[["tradeable", "Stocks + ETFs + Crypto"], ["stocks", "Stocks"], ["etfs", "ETFs"], ["crypto", "Crypto"], ["indices", "Indices"]].map(([v, l]) => `<option value="${v}" ${PK.universe === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>${warn}<div class="pkgrid">`;
+  const clsLabel = { stocks: "Stock", etfs: "ETF", crypto: "Crypto", indices: "Index" };
+  HORIZONS.forEach((H) => {
+    const picks = topPicks(H);
+    h += `<section class="pkcard"><div class="pkt"><h3>${H.t}</h3><span>${H.sub}</span></div>`;
+    if (!picks.length) h += `<p class="note">No asset currently passes the filters for this horizon.</p>`;
+    picks.forEach((p, i) => {
+      const r = p.r, f = p.pc.f, fc = r.fc;
+      const tgt = fc ? niceD(isoD(addBars(fc.asof, p.pc.steps, fc.calendar))) : "";
+      h += `<div class="pk" data-s="${r.sym}">
+        <div class="pkrank">${i + 1}</div>
+        <div class="pkmain">
+          <div class="pkline"><span class="sym">${r.sym.replace(/\d{3,}-USD$/, "-USD")}</span><span class="chip">${clsLabel[r._cls]}</span><span class="pkname">${r.name || ""}</span></div>
+          <div class="pkline mono"><span>${fmt.px(r.price)}</span>${f ? `<span class="mute">→ ${tgt}</span><b>${fmt.px(f.med)}</b><span class="${cls(f.chg)}">${fmt.pct(f.chg)}</span><span class="mute">80%: ${fmt.px(f.lo80)}–${fmt.px(f.hi80)}</span>` : ""}</div>
+          <div class="chips">${reasons(r, H, p.pc).map((x) => `<span class="chip g">${x}</span>`).join("")}</div>
+        </div>
+        <div class="pkscore"><div class="v">${p.ps.toFixed(0)}</div><div class="l">rank score</div></div>
+      </div>`;
+    });
+    h += `</section>`;
+  });
+  h += `</div><p class="note">How each list is ranked: <b>Daily/Weekly</b> favour entry timing (pullbacks in uptrends, oversold RSI(2)), trend, volume, short-range forecast odds and the asset's past forecast hit rate; Weekly also rewards a strong cycle low that is due. <b>Monthly</b> blends the composite score, momentum, forecast odds, hit rate and relative strength. <b>3/6/12 months</b> lean on medium-term momentum, trend, relative strength and (for stocks) Piotroski/Altman quality; leveraged/inverse ETFs are excluded from Monthly and longer lists because they decay over long holds. These are rankings, not guarantees — the further out, the wider the range.</p>`;
+  $("picks").innerHTML = h;
+  $("pkUni").onchange = (e) => { PK.universe = e.target.value; renderPicks(); };
+  $("picks").querySelectorAll(".pk").forEach((el) => (el.onclick = () => openDetail(el.dataset.s)));
+}
+
 /* ---------------- detail drawer ---------------- */
 const safe = (s) => s.replace(/[^A-Za-z0-9\-_.]/g, "_");
 async function openDetail(sym, keepScroll) {
-  const r = (S.data.classes[S.cls] || []).find((x) => x.sym === sym);
+  const r = findRow(sym);
   if (!r) return;
   S.openSym = sym;
   $("drawer").hidden = false;
@@ -310,14 +413,14 @@ async function openDetail(sym, keepScroll) {
     ${kv("3-month return", fmt.pct(r.ret63))}${kv("12-1 month momentum", fmt.pct(r.mom12_1))}
     ${kv("Distance to 52W high", fmt.pct(r.dist52h))}${kv("RSI divergence", r.div || "none")}
     </div>`;
-  if (S.cls === "stocks") body += `<h3>Fundamentals</h3><div class="grid2">${kv("Piotroski F-score", r.fscore == null ? "–" : r.fscore + " / 9")}${kv("Altman Z-score", r.altz == null ? "–" : fmt.n(r.altz, 2) + (r.sector === "Financial Services" ? " (n/a for financials)" : ""))}</div>`;
+  if (r._cls === "stocks") body += `<h3>Fundamentals</h3><div class="grid2">${kv("Piotroski F-score", r.fscore == null ? "–" : r.fscore + " / 9")}${kv("Altman Z-score", r.altz == null ? "–" : fmt.n(r.altz, 2) + (r.sector === "Financial Services" ? " (n/a for financials)" : ""))}</div>`;
   if (r.st_stop && r.atr_pct) {
     const risk = r.st_dir === 1 ? (r.price - r.st_stop) / r.price : null;
     if (risk) body += `<h3>Risk framing</h3><div class="grid2">${kv("Distance to ATR trail stop", fmt.pct(-risk, 2))}${kv("Position size at 1% account risk", (1 / (risk * 100) * 100).toFixed(0) + "% of account")}</div>`;
   }
-  if (S.cls === "crypto") body += `<h3>Futures (live, Binance)</h3><div class="grid2" id="fut">${kv("Funding rate (8h)", fundingCell(r))}${kv("Long/short account ratio", "loading…")}</div>`;
+  if (r._cls === "crypto") body += `<h3>Futures (live, Binance)</h3><div class="grid2" id="fut">${kv("Funding rate (8h)", fundingCell(r))}${kv("Long/short account ratio", "loading…")}</div>`;
   $("dBody").innerHTML = body;
-  if (S.cls === "crypto") loadLS(r);
+  if (r._cls === "crypto") loadLS(r);
   drawChart(sym);
 }
 function forecastSection(r) {
@@ -372,7 +475,7 @@ async function drawChart(sym) {
   line(h.e20, "#f2b33d"); line(h.e50, "#5b8cff"); line(h.e200, "#9b7bff", 2);
   const st = ch.addLineSeries({ lineWidth: 2, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
   st.setData(h.t.map((t, i) => h.st[i] == null ? { time: t } : { time: t, value: h.st[i], color: h.sd[i] === 1 ? "#22c38e" : "#f0565b" }));
-  const r = (S.data.classes[S.cls] || []).find((x) => x.sym === sym);
+  const r = findRow(sym);
   if (r && r.fc) {
     const fc = r.fc, lastT = h.t[h.t.length - 1];
     const H = Math.min(260, Math.max(63, barsBetween(fc.asof, S.fdate, fc.calendar)));

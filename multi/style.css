@@ -113,3 +113,26 @@ h3{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--mute)
 .lv .l{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.4px}
 .lv .v{font:600 15px var(--mono)} .lv .s{font:12px var(--mono);color:var(--mute)}
 tbody tr.sel{background:rgba(91,140,255,.10)}
+.pkhead{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.pkhead h2{margin:0 0 4px;font-size:20px}
+.pkuni{display:flex;gap:8px;align-items:center;color:var(--mute);font-size:13px}
+.pkuni select{background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:6px 9px;font:inherit}
+.pkwarn{margin:12px 0;padding:10px 14px;border-radius:10px;background:rgba(242,179,61,.08);border:1px solid rgba(242,179,61,.35);color:#e9d3a3;font-size:13px}
+.pkgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:14px;margin-top:14px}
+.pkcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.pkt{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:4px}
+.pkt h3{margin:0;color:var(--text);font-size:15px;text-transform:none;letter-spacing:0}
+.pkt span{color:var(--mute);font-size:12px}
+.pk{display:flex;gap:12px;align-items:center;padding:10px 6px;border-bottom:1px solid var(--line);cursor:pointer;border-radius:8px}
+.pk:last-child{border-bottom:0}
+.pk:hover{background:var(--panel2)}
+.pkrank{width:26px;height:26px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);display:grid;place-items:center;font:600 13px var(--mono);flex:0 0 auto}
+.pkmain{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+.pkline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pkline.mono{font:13px var(--mono)}
+.pkname{color:var(--mute);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
+.pkscore{text-align:right;flex:0 0 auto}
+.pkscore .v{font:600 18px var(--mono);color:var(--acc)}
+.pkscore .l{font-size:10px;color:var(--mute);text-transform:uppercase}
+.pk .chips{flex-wrap:wrap}
+@media (max-width:700px){.pkgrid{grid-template-columns:1fr}}
