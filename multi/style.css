@@ -82,3 +82,17 @@ h3{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--mute)
 .keep{color:var(--up);font-weight:600} .drop{color:var(--mute)}
 .err{background:rgba(240,86,91,.1);border:1px solid rgba(240,86,91,.4);padding:14px;border-radius:10px}
 @media (max-width:700px){.top{padding:10px 14px} main{padding:12px 14px} .grid2{grid-template-columns:1fr} .count{margin-left:0}}
+.fcbar{display:flex;gap:14px;align-items:center;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;color:var(--mute);font-size:13px}
+.fcbar label{display:flex;gap:8px;align-items:center}
+.fcbar input[type=date]{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:6px 9px;font:13px var(--mono);color-scheme:dark}
+.view,.quick{display:flex;gap:4px}
+.view button,.quick button{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:13px;color:var(--mute)}
+.view button.on{color:var(--text);border-color:var(--acc)}
+.quick button:hover{color:var(--text);border-color:var(--acc)}
+.rng{color:var(--mute);font-size:12px}
+.acc{font-size:12px}
+.fctable{width:100%;min-width:0;border:1px solid var(--line);border-radius:10px;margin:6px 0}
+.fctable th{position:static;cursor:default}
+.fctable tr.sel td{background:rgba(91,140,255,.08)}
+.note{font-size:12px;color:var(--mute);margin:6px 0}
+.turns{display:flex;gap:6px;flex-wrap:wrap}

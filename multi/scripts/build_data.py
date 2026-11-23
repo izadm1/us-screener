@@ -17,6 +17,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(__file__))
 import indicators as ind  # noqa: E402
 import universe as U  # noqa: E402
+import forecast as FC  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DATA = os.path.join(ROOT, "data")
@@ -206,6 +207,10 @@ def pct_rank(values):
 
 
 def clean(v):
+    if isinstance(v, dict):
+        return {k: clean(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [clean(x) for x in v]
     if isinstance(v, (np.floating, float)):
         return None if (v is None or math.isnan(v) or math.isinf(v)) else round(float(v), 6)
     if isinstance(v, np.integer):
@@ -298,6 +303,10 @@ def signals(r):
         s.append("Bearish divergence")
     if down:
         s.append("Downtrend")
+    fc = r.get("fc") or {}
+    for t in (fc.get("turns") or [])[:1]:
+        if t["bars"] <= 5 and (fc.get("cycle") or {}).get("strength", 0) >= 0.3:
+            s.append("Cycle trough due" if t["type"] == "trough" else "Cycle peak due")
     if r.get("altz") is not None and r["altz"] < 1.81 and r.get("sector") != "Financial Services":
         s.append("Distress risk")
     return s
@@ -413,6 +422,11 @@ def build(frames=None, fundamentals=None, sentiment=None):
             if cls == "stocks":
                 f.update({"fscore": meta.get("fscore"), "altz": meta.get("altz"),
                           "sector": meta.get("sector"), "mcap": meta.get("mcap")})
+            try:
+                f["fc"] = FC.forecast(df["Close"], calendar=(cls == "crypto"))
+            except Exception as e:
+                print("forecast failed", s, e)
+                f["fc"] = None
             rows.append(f)
             write_history(s, x)
         score_class(rows, cls, bench_r63)
