@@ -1,0 +1,1007 @@
+{
+"AAPL": {
+"asof": "2026-11-23",
+"name": "Apple Inc.",
+"sector": "Technology",
+"mcap": 4978144444416,
+"fscore": 9,
+"altz": 12.75
+},
+"MSFT": {
+"asof": "2026-11-23",
+"name": "Microsoft Corporation",
+"sector": "Technology",
+"mcap": 3598139523072,
+"fscore": 6,
+"altz": 8.67
+},
+"NVDA": {
+"asof": "2026-11-23",
+"name": "NVIDIA Corporation",
+"sector": "Technology",
+"mcap": 3031172907008,
+"fscore": 4
+},
+"AMZN": {
+"asof": "2026-11-23",
+"name": "Amazon.com, Inc.",
+"sector": "Consumer Cyclical",
+"mcap": 2668898811904,
+"fscore": 6,
+"altz": 5.66
+},
+"GOOGL": {
+"asof": "2026-11-23",
+"name": "Alphabet Inc.",
+"sector": "Communication Services",
+"mcap": 3261475323904,
+"fscore": 6
+},
+"META": {
+"asof": "2026-11-23",
+"name": "Meta Platforms, Inc.",
+"sector": "Communication Services",
+"mcap": 1433642336256,
+"fscore": 5,
+"altz": 7.8
+},
+"TSLA": {
+"asof": "2026-11-23",
+"name": "Tesla, Inc.",
+"sector": "Consumer Cyclical",
+"mcap": 1366942810112,
+"fscore": 5,
+"altz": 16.47
+},
+"AVGO": {
+"asof": "2026-11-23",
+"name": "Broadcom Inc.",
+"sector": "Technology",
+"mcap": 1453140738048,
+"fscore": 8,
+"altz": 10.75
+},
+"ORCL": {
+"asof": "2026-11-23",
+"name": "Oracle Corporation",
+"sector": "Technology",
+"mcap": 315480899584,
+"fscore": 5,
+"altz": 1.43
+},
+"AMD": {
+"asof": "2026-11-23",
+"name": "Advanced Micro Devices, Inc.",
+"sector": "Technology",
+"mcap": 702393286656,
+"fscore": 7,
+"altz": 31.29
+},
+"NFLX": {
+"asof": "2026-11-23",
+"name": "Netflix, Inc.",
+"sector": "Communication Services",
+"mcap": 232951873536,
+"fscore": 7,
+"altz": 7.55
+},
+"CRM": {
+"asof": "2026-11-23",
+"name": "Salesforce, Inc.",
+"sector": "Technology",
+"mcap": 148650262528,
+"fscore": 7,
+"altz": 2.49
+},
+"ADBE": {
+"asof": "2026-11-23",
+"name": "Adobe Inc.",
+"sector": "Technology",
+"mcap": 84732731392,
+"fscore": 7,
+"altz": 6.81
+},
+"INTC": {
+"asof": "2026-11-23",
+"name": "Intel Corporation",
+"sector": "Technology",
+"mcap": 272553181184,
+"fscore": 6,
+"altz": 2.72
+},
+"QCOM": {
+"asof": "2026-11-23",
+"name": "QUALCOMM Incorporated",
+"sector": "Technology",
+"mcap": 160435798016,
+"fscore": 5,
+"altz": 5.26
+},
+"TXN": {
+"asof": "2026-11-23",
+"name": "Texas Instruments Incorporated",
+"sector": "Technology",
+"mcap": 241006919680,
+"fscore": 7,
+"altz": 11.49
+},
+"MU": {
+"asof": "2026-11-23",
+"name": "Micron Technology, Inc.",
+"sector": "Technology",
+"mcap": 672642433024,
+"fscore": 8,
+"altz": 10.71
+},
+"AMAT": {
+"asof": "2026-11-23",
+"name": "Applied Materials, Inc.",
+"sector": "Technology",
+"mcap": 240166404096,
+"fscore": 3
+},
+"LRCX": {
+"asof": "2026-11-23",
+"name": "Lam Research Corporation",
+"sector": "Technology",
+"mcap": 228935565312,
+"fscore": 8,
+"altz": 17.16
+},
+"KLAC": {
+"asof": "2026-11-23",
+"name": "KLA Corporation",
+"sector": "Technology",
+"mcap": 165306843136,
+"fscore": 7,
+"altz": 11.22
+},
+"ARM": {
+"asof": "2026-11-23",
+"name": "Arm Holdings plc",
+"sector": "Technology",
+"mcap": 162853994496,
+"fscore": 6,
+"altz": 42.33
+},
+"SMCI": {
+"asof": "2026-11-23",
+"name": "Super Micro Computer, Inc.",
+"sector": "Technology",
+"mcap": 14272272384,
+"fscore": 2,
+"altz": 3.28
+},
+"PLTR": {
+"asof": "2026-11-23",
+"name": "Palantir Technologies Inc.",
+"sector": "Technology",
+"mcap": 345738838016,
+"fscore": 8,
+"altz": 148.31
+},
+"SNOW": {
+"asof": "2026-11-23",
+"name": "Snowflake Inc.",
+"sector": "Technology",
+"mcap": 89900498944,
+"fscore": 5,
+"altz": 6.24
+},
+"CRWD": {
+"asof": "2026-11-23",
+"name": "CrowdStrike Holdings, Inc.",
+"sector": "Technology",
+"mcap": 234931617792,
+"fscore": 4,
+"altz": 21.9
+},
+"PANW": {
+"asof": "2026-11-23",
+"name": "Palo Alto Networks, Inc.",
+"sector": "Technology",
+"mcap": 281865715712,
+"fscore": 3,
+"altz": 8.39
+},
+"NET": {
+"asof": "2026-11-23",
+"name": "Cloudflare, Inc.",
+"sector": "Technology",
+"mcap": 98543534080,
+"fscore": 4,
+"altz": 13.41
+},
+"DDOG": {
+"asof": "2026-11-23",
+"name": "Datadog, Inc.",
+"sector": "Technology",
+"mcap": 56817266688,
+"fscore": 6,
+"altz": 13.01
+},
+"SHOP": {
+"asof": "2026-11-23",
+"name": "Shopify Inc.",
+"sector": "Technology",
+"mcap": 159168495616,
+"fscore": 6,
+"altz": 57.63
+},
+"UBER": {
+"asof": "2026-11-23",
+"name": "Uber Technologies, Inc.",
+"sector": "Technology",
+"mcap": 129599275008,
+"fscore": 6,
+"altz": 3.27
+},
+"ABNB": {
+"asof": "2026-11-23",
+"name": "Airbnb, Inc.",
+"sector": "Consumer Cyclical",
+"mcap": 101660999680,
+"fscore": 6,
+"altz": 5.21
+},
+"COIN": {
+"asof": "2026-11-23",
+"name": "Coinbase Global, Inc.",
+"sector": "Financial Services",
+"mcap": 26997925888,
+"fscore": 4,
+"altz": 2.28
+},
+"MSTR": {
+"asof": "2026-11-23",
+"name": "Strategy Inc",
+"sector": "Technology",
+"mcap": 32931311616,
+"fscore": 3,
+"altz": 1.76
+},
+"HOOD": {
+"asof": "2026-11-23",
+"name": "Robinhood Markets, Inc.",
+"sector": "Financial Services",
+"mcap": 55983542272,
+"fscore": 5,
+"altz": 1.62
+},
+"SOFI": {
+"asof": "2026-11-23",
+"name": "SoFi Technologies, Inc.",
+"sector": "Financial Services",
+"mcap": 16197047296,
+"fscore": 2
+},
+"RBLX": {
+"asof": "2026-11-23",
+"name": "Roblox Corporation",
+"sector": "Communication Services",
+"mcap": 33438128128,
+"fscore": 6,
+"altz": 1.57
+},
+"U": {
+"asof": "2026-11-23",
+"name": "Unity Software Inc.",
+"sector": "Technology",
+"mcap": 19861334016,
+"fscore": 6,
+"altz": 3.04
+},
+"DELL": {
+"asof": "2026-11-23",
+"name": "Dell Technologies Inc.",
+"sector": "Technology",
+"mcap": 176768647168,
+"fscore": 7,
+"altz": 2.41
+},
+"ANET": {
+"asof": "2026-11-23",
+"name": "Arista Networks, Inc.",
+"sector": "Technology",
+"mcap": 211771506688,
+"fscore": 5,
+"altz": 20.43
+},
+"MRVL": {
+"asof": "2026-11-23",
+"name": "Marvell Technology, Inc.",
+"sector": "Technology",
+"mcap": 110023368704,
+"fscore": 8,
+"altz": 9.38
+},
+"JPM": {
+"asof": "2026-11-23",
+"name": "JP Morgan Chase & Co.",
+"sector": "Financial Services",
+"mcap": 824646434816,
+"fscore": 3
+},
+"BAC": {
+"asof": "2026-11-23",
+"name": "Bank of America Corporation",
+"sector": "Financial Services",
+"mcap": 324585848832,
+"fscore": 5
+},
+"WFC": {
+"asof": "2026-11-23",
+"name": "Wells Fargo & Company",
+"sector": "Financial Services",
+"mcap": 236005490688,
+"fscore": 3
+},
+"GS": {
+"asof": "2026-11-23",
+"name": "Goldman Sachs Group, Inc. (The)",
+"sector": "Financial Services",
+"mcap": 228062347264,
+"fscore": 4
+},
+"MS": {
+"asof": "2026-11-23",
+"name": "Morgan Stanley",
+"sector": "Financial Services",
+"mcap": 258949464064,
+"fscore": 3
+},
+"C": {
+"asof": "2026-11-23",
+"name": "Citigroup, Inc.",
+"sector": "Financial Services",
+"mcap": 183098720256,
+"fscore": 3
+},
+"SCHW": {
+"asof": "2026-11-23",
+"name": "Charles Schwab Corporation (The",
+"sector": "Financial Services",
+"mcap": 155616854016,
+"fscore": 7
+},
+"V": {
+"asof": "2026-11-23",
+"name": "Visa Inc.",
+"sector": "Financial Services",
+"mcap": 749809041408,
+"fscore": 7,
+"altz": 9.41
+},
+"MA": {
+"asof": "2026-11-23",
+"name": "Mastercard Incorporated",
+"sector": "Financial Services",
+"mcap": 544999112704,
+"fscore": 9,
+"altz": 11.04
+},
+"PYPL": {
+"asof": "2026-11-23",
+"name": "PayPal Holdings, Inc.",
+"sector": "Financial Services",
+"mcap": 44265783296,
+"fscore": 9,
+"altz": 1.9
+},
+"AXP": {
+"asof": "2026-11-23",
+"name": "American Express Company",
+"sector": "Financial Services",
+"mcap": 202305552384,
+"fscore": 4
+},
+"BRK-B": {
+"asof": "2026-11-23",
+"name": "Berkshire Hathaway Inc. New",
+"sector": "Financial Services",
+"mcap": 1210976043008,
+"fscore": 4
+},
+"UNH": {
+"asof": "2026-11-23",
+"name": "UnitedHealth Group Incorporated",
+"sector": "Healthcare",
+"mcap": 304513286144,
+"fscore": 6,
+"altz": 2.86
+},
+"LLY": {
+"asof": "2026-11-23",
+"name": "Eli Lilly and Company",
+"sector": "Healthcare",
+"mcap": 1199931523072,
+"fscore": 7,
+"altz": 10.35
+},
+"JNJ": {
+"asof": "2026-11-23",
+"name": "Johnson & Johnson",
+"sector": "Healthcare",
+"mcap": 651105206272,
+"fscore": 3
+},
+"ABBV": {
+"asof": "2026-11-23",
+"name": "AbbVie Inc.",
+"sector": "Healthcare",
+"mcap": 505891782656,
+"fscore": 7,
+"altz": 2.61
+},
+"MRK": {
+"asof": "2026-11-23",
+"name": "Merck & Company, Inc.",
+"sector": "Healthcare",
+"mcap": 329652666368,
+"fscore": 4,
+"altz": 4.25
+},
+"PFE": {
+"asof": "2026-11-23",
+"name": "Pfizer, Inc.",
+"sector": "Healthcare",
+"mcap": 156175990784,
+"fscore": 5,
+"altz": 2.04
+},
+"TMO": {
+"asof": "2026-11-23",
+"name": "Thermo Fisher Scientific Inc",
+"sector": "Healthcare",
+"mcap": 248075190272,
+"fscore": 5,
+"altz": 4.18
+},
+"ISRG": {
+"asof": "2026-11-23",
+"name": "Intuitive Surgical, Inc.",
+"sector": "Healthcare",
+"mcap": 138328162304,
+"fscore": 5,
+"altz": 34.88
+},
+"AMGN": {
+"asof": "2026-11-23",
+"name": "Amgen Inc.",
+"sector": "Healthcare",
+"mcap": 235642683392,
+"fscore": 7,
+"altz": 2.22
+},
+"GILD": {
+"asof": "2026-11-23",
+"name": "Gilead Sciences, Inc.",
+"sector": "Healthcare",
+"mcap": 206429536256,
+"fscore": 8,
+"altz": 4.96
+},
+"NVO": {
+"asof": "2026-11-23",
+"name": "Novo Nordisk A/S",
+"sector": "Healthcare",
+"mcap": 166686162944,
+"fscore": 4,
+"altz": 2.08
+},
+"WMT": {
+"asof": "2026-11-23",
+"name": "Walmart Inc.",
+"sector": "Consumer Defensive",
+"mcap": 1018236174336,
+"fscore": 7,
+"altz": 6.72
+},
+"COST": {
+"asof": "2026-11-23",
+"name": "Costco Wholesale Corporation",
+"sector": "Consumer Defensive",
+"mcap": 488395014144,
+"fscore": 5,
+"altz": 9.85
+},
+"HD": {
+"asof": "2026-11-23",
+"name": "Home Depot, Inc. (The)",
+"sector": "Consumer Cyclical",
+"mcap": 338256691200,
+"fscore": 4,
+"altz": 5.71
+},
+"LOW": {
+"asof": "2026-11-23",
+"name": "Lowe's Companies, Inc.",
+"sector": "Consumer Cyclical",
+"mcap": 123903164416,
+"fscore": 5,
+"altz": 3.13
+},
+"MCD": {
+"asof": "2026-11-23",
+"name": "McDonald's Corporation",
+"sector": "Consumer Cyclical",
+"mcap": 192848625664,
+"fscore": 6,
+"altz": 4.68
+},
+"SBUX": {
+"asof": "2026-11-23",
+"name": "Starbucks Corporation",
+"sector": "Consumer Cyclical",
+"mcap": 117578506240,
+"fscore": 7,
+"altz": 3.27
+},
+"NKE": {
+"asof": "2026-11-23",
+"name": "Nike, Inc.",
+"sector": "Consumer Cyclical",
+"mcap": 48896364544,
+"fscore": 4,
+"altz": 3.15
+},
+"KO": {
+"asof": "2026-11-23",
+"name": "Coca-Cola Company (The)",
+"sector": "Consumer Defensive",
+"mcap": 417241497600,
+"fscore": 7,
+"altz": 5.75
+},
+"PEP": {
+"asof": "2026-11-23",
+"name": "Pepsico, Inc.",
+"sector": "Consumer Defensive",
+"mcap": 191519621120,
+"fscore": 5,
+"altz": 3.44
+},
+"PG": {
+"asof": "2026-11-23",
+"name": "Procter & Gamble Company (The)",
+"sector": "Consumer Defensive",
+"mcap": 392562900992,
+"fscore": 6,
+"altz": 5.89
+},
+"DIS": {
+"asof": "2026-11-23",
+"name": "Walt Disney Company (The)",
+"sector": "Communication Services",
+"mcap": 201513353216,
+"fscore": 7,
+"altz": 2.54
+},
+"TGT": {
+"asof": "2026-11-23",
+"name": "Target Corporation",
+"sector": "Consumer Defensive",
+"mcap": 75076984832,
+"fscore": 6,
+"altz": 3.28
+},
+"LULU": {
+"asof": "2026-11-23",
+"name": "lululemon athletica inc.",
+"sector": "Consumer Cyclical",
+"mcap": 11886062592,
+"fscore": 4,
+"altz": 5.3
+},
+"CMG": {
+"asof": "2026-11-23",
+"name": "Chipotle Mexican Grill, Inc.",
+"sector": "Consumer Cyclical",
+"mcap": 44969861120,
+"fscore": 6,
+"altz": 6.58
+},
+"XOM": {
+"asof": "2026-11-23",
+"name": "ExxonMobil Holdings Corporation",
+"sector": "Energy",
+"mcap": 652634816512,
+"fscore": 5,
+"altz": 4.71
+},
+"CVX": {
+"asof": "2026-11-23",
+"name": "Chevron Corporation",
+"sector": "Energy",
+"mcap": 406582722560,
+"fscore": 5,
+"altz": 3.54
+},
+"COP": {
+"asof": "2026-11-23",
+"name": "ConocoPhillips",
+"sector": "Energy",
+"mcap": 160939442176,
+"fscore": 7,
+"altz": 3.37
+},
+"OXY": {
+"asof": "2026-11-23",
+"name": "Occidental Petroleum Corporatio",
+"sector": "Energy",
+"mcap": 53894328320,
+"fscore": 4,
+"altz": 1.45
+},
+"SLB": {
+"asof": "2026-11-23",
+"name": "SLB Limited",
+"sector": "Energy",
+"mcap": 67734994944,
+"fscore": 4,
+"altz": 2.98
+},
+"CAT": {
+"asof": "2026-11-23",
+"name": "Caterpillar, Inc.",
+"sector": "Industrials",
+"mcap": 233578954752,
+"fscore": 6,
+"altz": 4.03
+},
+"DE": {
+"asof": "2026-11-23",
+"name": "Deere & Company",
+"sector": "Industrials",
+"mcap": 164269277184,
+"fscore": 5,
+"altz": 3.22
+},
+"BA": {
+"asof": "2026-11-23",
+"name": "Boeing Company (The)",
+"sector": "Industrials",
+"mcap": 123535015936,
+"fscore": 6,
+"altz": 1.38
+},
+"GE": {
+"asof": "2026-11-23",
+"name": "GE Aerospace",
+"sector": "Industrials",
+"mcap": 319946424320,
+"fscore": 6,
+"altz": 3.31
+},
+"LMT": {
+"asof": "2026-11-23",
+"name": "Lockheed Martin Corporation",
+"sector": "Industrials",
+"mcap": 130633121792,
+"fscore": 6,
+"altz": 3.49
+},
+"RTX": {
+"asof": "2026-11-23",
+"name": "RTX Corporation",
+"sector": "Industrials",
+"mcap": 256623099904,
+"fscore": 8,
+"altz": 2.68
+},
+"HON": {
+"asof": "2026-11-23",
+"name": "Honeywell International Inc.",
+"sector": "Industrials",
+"mcap": 67483115520,
+"fscore": 5,
+"altz": 2.59
+},
+"UPS": {
+"asof": "2026-11-23",
+"name": "United Parcel Service, Inc.",
+"sector": "Industrials",
+"mcap": 90443079680,
+"fscore": 6,
+"altz": 2.98
+},
+"FCX": {
+"asof": "2026-11-23",
+"name": "Freeport-McMoRan, Inc.",
+"sector": "Basic Materials",
+"mcap": 65992712192,
+"fscore": 6,
+"altz": 2.47
+},
+"NEM": {
+"asof": "2026-11-23",
+"name": "Newmont Corporation",
+"sector": "Basic Materials",
+"mcap": 98390810624,
+"fscore": 9,
+"altz": 3.86
+},
+"RIVN": {
+"asof": "2026-11-23",
+"name": "Rivian Automotive, Inc.",
+"sector": "Consumer Cyclical",
+"mcap": 15080628224,
+"fscore": 4,
+"altz": -1.64
+},
+"LCID": {
+"asof": "2026-11-23",
+"name": "Lucid Group, Inc.",
+"sector": "Consumer Cyclical",
+"mcap": 990632064,
+"fscore": 2,
+"altz": -3.3
+},
+"NIO": {
+"asof": "2026-11-23",
+"name": "NIO Inc.",
+"sector": "Consumer Cyclical",
+"mcap": 6138884608,
+"fscore": 6,
+"altz": -1.09
+},
+"MARA": {
+"asof": "2026-11-23",
+"name": "MARA Holdings, Inc.",
+"sector": "Financial Services",
+"mcap": 1969961600,
+"fscore": 2,
+"altz": -0.4
+},
+"RIOT": {
+"asof": "2026-11-23",
+"name": "Riot Platforms, Inc.",
+"sector": "Financial Services",
+"mcap": 6089235456,
+"fscore": 2,
+"altz": 2.53
+},
+"AFRM": {
+"asof": "2026-11-23",
+"name": "Affirm Holdings, Inc.",
+"sector": "Financial Services",
+"mcap": 18306752512,
+"fscore": 6,
+"altz": 2.39
+},
+"UPST": {
+"asof": "2026-11-23",
+"name": "Upstart Holdings, Inc.",
+"sector": "Financial Services",
+"mcap": 1548909568,
+"fscore": 3
+},
+"IONQ": {
+"asof": "2026-11-23",
+"name": "IonQ, Inc.",
+"sector": "Technology",
+"mcap": 9590912000,
+"fscore": 4,
+"altz": 1.98
+},
+"RKLB": {
+"asof": "2026-11-23",
+"name": "Rocket Lab Corporation",
+"sector": "Industrials",
+"mcap": 30566393856,
+"fscore": 5,
+"altz": 30.33
+},
+"SOUN": {
+"asof": "2026-11-23",
+"name": "SoundHound AI, Inc.",
+"sector": "Technology",
+"mcap": 1274706688,
+"fscore": 4,
+"altz": 2.11
+},
+"SPY": {
+"asof": "2026-11-23",
+"name": "State Street SPDR S&P 500 ETF T"
+},
+"QQQ": {
+"asof": "2026-11-23",
+"name": "Invesco QQQ Trust, Series 1"
+},
+"DIA": {
+"asof": "2026-11-23",
+"name": "State Street SPDR Dow Jones Ind"
+},
+"IWM": {
+"asof": "2026-11-23",
+"name": "iShares Russell 2000 Index Fund"
+},
+"VTI": {
+"asof": "2026-11-23",
+"name": "Vanguard Morningstar Total Stoc"
+},
+"VOO": {
+"asof": "2026-11-23",
+"name": "Vanguard S&P 500 ETF"
+},
+"RSP": {
+"asof": "2026-11-23",
+"name": "Invesco S&P 500 Equal Weight ET"
+},
+"XLK": {
+"asof": "2026-11-23",
+"name": "State Street Technology Select "
+},
+"XLF": {
+"asof": "2026-11-23",
+"name": "State Street Financial Select S"
+},
+"XLE": {
+"asof": "2026-11-23",
+"name": "State Street Energy Select Sect"
+},
+"XLV": {
+"asof": "2026-11-23",
+"name": "State Street Health Care Select"
+},
+"XLI": {
+"asof": "2026-11-23",
+"name": "State Street Industrial Select "
+},
+"XLY": {
+"asof": "2026-11-23",
+"name": "State Street Consumer Discretio"
+},
+"XLP": {
+"asof": "2026-11-23",
+"name": "State Street Consumer Staples S"
+},
+"XLU": {
+"asof": "2026-11-23",
+"name": "State Street Utilities Select S"
+},
+"XLB": {
+"asof": "2026-11-23",
+"name": "State Street Materials Select S"
+},
+"XLRE": {
+"asof": "2026-11-23",
+"name": "State Street Real Estate Select"
+},
+"XLC": {
+"asof": "2026-11-23",
+"name": "State Street Communication Serv"
+},
+"SMH": {
+"asof": "2026-11-23",
+"name": "VanEck Semiconductor ETF"
+},
+"SOXX": {
+"asof": "2026-11-23",
+"name": "iShares PHLX SOX Semiconductor "
+},
+"ARKK": {
+"asof": "2026-11-23",
+"name": "ARK Innovation ETF"
+},
+"IGV": {
+"asof": "2026-11-23",
+"name": "iShares Expanded Tech-Software "
+},
+"KRE": {
+"asof": "2026-11-23",
+"name": "State Street SPDR S&P Regional "
+},
+"XBI": {
+"asof": "2026-11-23",
+"name": "State Street SPDR S&P Biotech E"
+},
+"ITB": {
+"asof": "2026-11-23",
+"name": "iShares U.S. Home Construction "
+},
+"XHB": {
+"asof": "2026-11-23",
+"name": "State Street SPDR S&P Homebuild"
+},
+"JETS": {
+"asof": "2026-11-23",
+"name": "U.S. Global Jets ETF"
+},
+"TLT": {
+"asof": "2026-11-23",
+"name": "iShares 20+ Year Treasury Bond "
+},
+"IEF": {
+"asof": "2026-11-23",
+"name": "iShares 7-10 Year Treasury Bond"
+},
+"SHY": {
+"asof": "2026-11-23",
+"name": "iShares 1-3 Year Treasury Bond "
+},
+"HYG": {
+"asof": "2026-11-23",
+"name": "iShares iBoxx $ High Yield Corp"
+},
+"LQD": {
+"asof": "2026-11-23",
+"name": "iShares iBoxx $ Investment Grad"
+},
+"GLD": {
+"asof": "2026-11-23",
+"name": "SPDR Gold Shares"
+},
+"SLV": {
+"asof": "2026-11-23",
+"name": "iShares Silver Trust"
+},
+"USO": {
+"asof": "2026-11-23",
+"name": "United States Oil Fund"
+},
+"UNG": {
+"asof": "2026-11-23",
+"name": "United States Natural Gas Fund "
+},
+"DBC": {
+"asof": "2026-11-23",
+"name": "Invesco DB Commodity Index Trac"
+},
+"EEM": {
+"asof": "2026-11-23",
+"name": "iShares MSCI Emerging Index Fun"
+},
+"EFA": {
+"asof": "2026-11-23",
+"name": "iShares MSCI EAFE ETF"
+},
+"FXI": {
+"asof": "2026-11-23",
+"name": "iShares China Large-Cap ETF"
+},
+"EWJ": {
+"asof": "2026-11-23",
+"name": "iShares MSCI Japan Index Fund"
+},
+"EWZ": {
+"asof": "2026-11-23",
+"name": "iShares MSCI Brazil ETF"
+},
+"INDA": {
+"asof": "2026-11-23",
+"name": "Ishares MSCI India ETF"
+},
+"EWM": {
+"asof": "2026-11-23",
+"name": "iShares MSCI Malaysia Index Fun"
+},
+"TQQQ": {
+"asof": "2026-11-23",
+"name": "ProShares UltraPro QQQ"
+},
+"SQQQ": {
+"asof": "2026-11-23",
+"name": "ProShares UltraPro Short QQQ"
+},
+"SOXL": {
+"asof": "2026-11-23",
+"name": "Direxion Daily Semiconductor Bu"
+},
+"SOXS": {
+"asof": "2026-11-23",
+"name": "Direxion Daily Semiconductor Be"
+},
+"UVXY": {
+"asof": "2026-11-23",
+"name": "ProShares Ultra VIX Short Term "
+},
+"IBIT": {
+"asof": "2026-11-23",
+"name": "iShares Bitcoin Trust ETF"
+},
+"ETHA": {
+"asof": "2026-11-23",
+"name": "iShares Ethereum Trust ETF"
+}
+}
