@@ -1,0 +1,4 @@
+ticker,trade,bias,final,hist_win,hist_edge,trigger,stop,target_price,shares,hold_mins,planned_at
+RBLX,Long · Gap & Go,Long,55.0000,54.2572,0.0048,52.0000,50.3959,55.2082,77,100.9979,Mon 23 Nov 2026 09:04 ET
+AAPL,Long · Trend pullback,Long,52.0000,50.7965,0.0217,348.0500,343.9595,354.3400,30,99.6844,Mon 23 Nov 2026 09:04 ET
+ARM,Long · Gap & Go,Long,49.0000,51.2681,0.0643,179.1101,170.9976,194.2520,15,84.9168,Mon 23 Nov 2026 09:04 ET
