@@ -744,4 +744,16 @@ const METHOD = `
 <li>Daily bars from Yahoo Finance via GitHub Actions; can lag or have gaps. Fundamentals refresh weekly.</li>
 <li>Research tool only — not investment advice.</li></ul>`;
 
+/* ---------------- self-update: reload if a newer build has been published ---------------- */
+async function checkBuild() {
+  try {
+    const mine = document.querySelector('meta[name="build"]')?.content;
+    const txt = await (await fetch("index.html?ts=" + Date.now(), { cache: "no-store" })).text();
+    const m = txt.match(/<meta name="build" content="([^"]+)"/);
+    if (m && mine && m[1] !== mine && !/__V__/.test(m[1])) location.replace(location.pathname + "?v=" + m[1] + location.hash);
+  } catch (e) { /* offline: keep current */ }
+}
+checkBuild();
+setInterval(checkBuild, 15 * 60 * 1000);
+if (/[?&]tab=picks/.test(location.search) || location.hash === "#picks") setTimeout(() => document.querySelector('#tabs button[data-cls="picks"]').click(), 300);
 load();
