@@ -146,3 +146,17 @@ tbody tr.sel{background:rgba(91,140,255,.10)}
   .pk{gap:8px;padding:10px 2px}
   .pkname{max-width:120px}
 }
+.bs{margin-top:16px;background:linear-gradient(180deg,rgba(91,140,255,.06),transparent);border:1px solid var(--line);border-radius:14px;padding:14px}
+.bshead{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start}
+.bshead h2{margin:0 0 4px;font-size:18px}
+.bsctl{display:flex;gap:8px;flex-wrap:wrap;align-items:center;width:100%}
+.bsctl .view{flex-wrap:wrap}
+.bsgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px}
+.pkcard.buy{border-color:rgba(34,195,142,.35)} .pkcard.sell{border-color:rgba(240,86,91,.35)}
+.pkcard.buy h3{color:var(--up)} .pkcard.sell h3{color:var(--down)}
+.pkrank.rb{border-color:rgba(34,195,142,.5)} .pkrank.rs{border-color:rgba(240,86,91,.5)}
+.pkscore .v.up{color:var(--up)} .pkscore .v.down{color:var(--down)}
+.pksec{font-size:18px;margin:22px 0 0}
+.sigchip{font:600 11px var(--sans);padding:3px 8px;border-radius:6px;letter-spacing:.3px}
+.sigchip.sb{background:rgba(34,195,142,.15);color:var(--up)} .sigchip.ss{background:rgba(240,86,91,.15);color:var(--down)}
+@media (max-width:900px){.bsgrid{grid-template-columns:1fr}}

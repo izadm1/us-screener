@@ -66,6 +66,7 @@ const COLS = [
   { k: "sym", t: "Symbol", f: (r) => `<span class="sym">${disp(r)}</span><span class="nm">${r.name || ""}${r.group ? " · " + r.group : ""}</span>` },
   { k: "price", t: "Price", f: (r) => fmt.px(r.price) },
   { k: "chg1d", t: "1D", f: (r) => `<span class="${cls(r.chg1d)}">${fmt.pct(r.chg1d)}</span>` },
+  { k: "bs", t: "Signal (1W)", only: ["forex", "crypto"], f: (r) => { const s = signalOf(r); return s ? `<span class="sigchip ${s.side === "BUY" ? "sb" : "ss"}">${s.ps >= 80 ? "STRONG " : ""}${s.side}</span>` : '<span class="mute">—</span>'; } },
   { k: "fmed", t: "Est. price", v: "forecast", f: (r) => r._f ? `<b>${fmt.px(r._f.med)}</b>` : "–" },
   { k: "fchg", t: "Est. Δ", v: "forecast", f: (r) => r._f ? `<span class="${cls(r._f.chg)}">${fmt.pct(r._f.chg)}</span>` : "–" },
   { k: "frng", t: "80% range", v: "forecast", sortable: false, f: (r) => r._f ? `<span class="rng">${fmt.px(r._f.lo80)} – ${fmt.px(r._f.hi80)}</span>` : "–" },
@@ -238,6 +239,7 @@ function rows() {
   const val = (x) => {
     switch (key) {
       case "funding": return S.funding[futSym(x)];
+      case "bs": { const s = signalOf(x); return s ? (s.side === "BUY" ? s.ps : -s.ps) : 0; }
       case "fmed": case "fchg": return x._f ? x._f.chg : null;
       case "pup": return x._f ? x._f.pup : null;
       case "acc": return x.fc && x.fc.acc ? x.fc.acc.dir : null;
@@ -254,7 +256,7 @@ function rows() {
 }
 function render() {
   if (!S.data) return;
-  const cols = COLS.filter((c) => (!c.only || c.only === S.cls) && (!c.v || c.v === S.view));
+  const cols = COLS.filter((c) => (!c.only || [].concat(c.only).includes(S.cls)) && (!c.v || c.v === S.view));
   $("tbl").querySelector("thead").innerHTML = "<tr>" + cols.map((c) => `<th data-k="${c.k}" class="${S.sort.key === c.k ? "sorted" : ""}">${c.t}${S.sort.key === c.k ? (S.sort.dir < 0 ? " ↓" : " ↑") : ""}</th>`).join("") + "</tr>";
   const list = rows();
   $("tbl").querySelector("tbody").innerHTML = list.map((r) => `<tr data-s="${r.sym}">` + cols.map((c) => `<td class="${c.cl || ""}">${c.f(r)}</td>`).join("") + "</tr>").join("");
@@ -306,7 +308,7 @@ const HORIZONS = [
   { id: "h", t: "6 Months", sub: "next ~6 months", h: 126, w: { momentum: .35, trend: .25, relstr: .15, qual: .25 }, longOnly: true },
   { id: "y", t: "12 Months", sub: "next ~12 months", h: 252, w: { momentum: .30, trend: .25, relstr: .15, qual: .30 }, longOnly: true },
 ];
-const PK = { universe: "tradeable" };
+const PK = { universe: "tradeable", bsCls: "forex", bsH: "w" };
 function pickComponents(r, H) {
   const b = r.buckets || {}, fc = r.fc;
   const steps = fc ? (fc.calendar ? Math.round(H.h * 365 / 252) : H.h) : H.h;
@@ -338,54 +340,114 @@ function reasons(r, H, pc) {
   if (pc.f && pc.f.pup >= 0.6) out.push(`${Math.round(pc.f.pup * 100)}% chance higher`);
   return out.slice(0, 3);
 }
+const clamp = (v) => Math.max(0, Math.min(100, v));
+function sellTiming(r) { // sell rallies inside downtrends; avoid shorting washed-out moves
+  let tm = 50;
+  if (r.z20 >= -0.5 && r.z20 <= 2) tm += 20;
+  if (r.rsi14 >= 35 && r.rsi14 <= 60) tm += 15;
+  if (r.rsi2 > 90) tm += 15;
+  if (r.rsi14 < 25 || r.z20 < -2.2) tm = 15;
+  return Math.min(tm, 100);
+}
+function sellComponents(r, H) {
+  const pc = pickComponents(r, H), b = r.buckets || {};
+  const inv = (v) => (v == null ? null : 100 - v);
+  const t = nextTurn(r), near = t && t.bars <= Math.max(3, H.h) && r.fc.cycle && r.fc.cycle.strength >= 0.3;
+  return { f: pc.f, steps: pc.steps, c: {
+    timing: sellTiming(r), trend: inv(b.trend), volume: inv(b.volume), momentum: inv(b.momentum), relstr: inv(b.relstr),
+    score: inv(r.score), qual: inv(b.quality ?? r.score), pup: pc.f ? clamp((0.5 - pc.f.pup) * 400 + 50) : null,
+    acc: pc.c.acc, cycle: near ? (t.type === "peak" ? 100 : 0) : 50 } };
+}
+function rankSide(r, H, side) {
+  const sig = r.signals || [];
+  if (r.sym === "^VIX") return null;
+  if (side === "buy") {
+    if (sig.includes("Downtrend") || sig.includes("Distress risk")) return null;
+    if (H.noExt && sig.includes("Overextended")) return null;
+    if (H.longOnly && LEVERAGED.has(r.sym)) return null;
+    if (!(r.above200 || (r.above200 == null && r.st_dir === 1))) return null;
+  } else {
+    if (!(r.above200 === false || (r.above200 == null && r.st_dir === -1))) return null;
+    if (H.noExt && (r.rsi14 < 25 || r.z20 < -2.2)) return null;
+  }
+  const pc = side === "buy" ? pickComponents(r, H) : sellComponents(r, H);
+  let num = 0, den = 0;
+  for (const [k, w] of Object.entries(H.w)) { const v = pc.c[k]; if (v != null && !Number.isNaN(v)) { num += w * v; den += w; } }
+  return den ? { r, pc, ps: num / den, side } : null;
+}
+function sidePicks(classes, H, side, n = 5) {
+  const out = [];
+  classes.forEach((c) => (S.data.classes[c] || []).forEach((r) => { const x = rankSide(r, H, side); if (x) out.push(x); }));
+  return out.sort((a, b) => b.ps - a.ps).slice(0, n);
+}
 function topPicks(H) {
   const classes = PK.universe === "tradeable" ? ["stocks", "etfs", "crypto"] : PK.universe === "all" ? ["stocks", "etfs", "crypto", "forex"] : [PK.universe];
-  const cands = [];
-  classes.forEach((c) => (S.data.classes[c] || []).forEach((r) => {
-    const sig = r.signals || [];
-    if (r.sym === "^VIX" || sig.includes("Downtrend") || sig.includes("Distress risk")) return;
-    if (H.noExt && sig.includes("Overextended")) return;
-    if (H.longOnly && LEVERAGED.has(r.sym)) return;
-    if (!(r.above200 || (r.above200 == null && r.st_dir === 1))) return;
-    const pc = pickComponents(r, H);
-    let num = 0, den = 0;
-    for (const [k, w] of Object.entries(H.w)) { const v = pc.c[k]; if (v != null && !Number.isNaN(v)) { num += w * v; den += w; } }
-    if (!den) return;
-    cands.push({ r, pc, ps: num / den });
-  }));
-  cands.sort((a, b) => b.ps - a.ps);
-  return cands.slice(0, 5);
+  return sidePicks(classes, H, "buy");
+}
+function signalOf(r) { // weekly-horizon buy/sell call used in the Forex & Crypto tables
+  const H = HORIZONS[1], b = rankSide(r, H, "buy"), s = rankSide(r, H, "sell");
+  if (b && b.ps >= 65 && (!s || b.ps >= s.ps)) return { side: "BUY", ps: b.ps };
+  if (s && s.ps >= 65) return { side: "SELL", ps: s.ps };
+  return null;
+}
+function sellReasons(r, H, pc) {
+  const out = [], b = r.buckets || {};
+  if (H.h <= 5 && pc.c.timing >= 80) out.push("Rally into downtrend");
+  if (r.rsi2 > 90 && H.h <= 5) out.push("Short-term overbought");
+  if (pc.c.cycle === 100) out.push("Cycle high due");
+  if ((b.trend ?? 100) <= 20) out.push("Strong downtrend");
+  if ((b.momentum ?? 100) <= 25) out.push("Weak momentum");
+  if ((r.signals || []).includes("Bearish divergence")) out.push("Bearish divergence");
+  if (r.fc && r.fc.acc && r.fc.acc.dir >= 0.6) out.push(`${Math.round(r.fc.acc.dir * 100)}% past hit rate`);
+  if (pc.f && pc.f.pup <= 0.4) out.push(`${Math.round((1 - pc.f.pup) * 100)}% chance lower`);
+  return out.slice(0, 3);
+}
+function pickRow(p, i, H) {
+  const r = p.r, f = p.pc.f, fc = r.fc, sell = p.side === "sell";
+  const clsLabel = { stocks: "Stock", etfs: "ETF", crypto: "Crypto", indices: "Index", forex: "Forex" };
+  const tgt = fc ? niceD(isoD(addBars(fc.asof, p.pc.steps, fc.calendar))) : "";
+  const rs = sell ? sellReasons(r, H, p.pc) : reasons(r, H, p.pc);
+  return `<div class="pk" data-s="${r.sym}">
+    <div class="pkrank ${sell ? "rs" : "rb"}">${i + 1}</div>
+    <div class="pkmain">
+      <div class="pkline"><span class="sym">${disp(r)}</span><span class="chip">${clsLabel[r._cls]}</span><span class="pkname">${r.name || ""}</span></div>
+      <div class="pkline mono"><span>${fmt.px(r.price)}</span>${f ? `<span class="mute">→ ${tgt}</span><b>${fmt.px(f.med)}</b><span class="${cls(f.chg)}">${fmt.pct(f.chg, 2)}</span><span class="mute">80%: ${fmt.px(f.lo80)}–${fmt.px(f.hi80)}</span>` : ""}</div>
+      ${sell && r.st_stop ? `<div class="pkline mono mute">stop above ${fmt.px(r.st_stop)} (ATR trail)</div>` : !sell && r.st_stop && r.st_dir === 1 ? `<div class="pkline mono mute">stop below ${fmt.px(r.st_stop)} (ATR trail)</div>` : ""}
+      <div class="chips">${rs.map((x) => `<span class="chip ${sell ? "r" : "g"}">${x}</span>`).join("")}</div>
+    </div>
+    <div class="pkscore"><div class="v ${sell ? "down" : "up"}">${p.ps.toFixed(0)}</div><div class="l">${sell ? "sell" : "buy"} score</div></div>
+  </div>`;
+}
+function renderBuySell() {
+  const H = HORIZONS.find((x) => x.id === PK.bsH);
+  const classes = [PK.bsCls];
+  const buys = sidePicks(classes, H, "buy"), sells = sidePicks(classes, H, "sell");
+  const col = (list, side) => `<section class="pkcard ${side}"><div class="pkt"><h3>${side === "buy" ? "▲ Top 5 BUY" : "▼ Top 5 SELL"}</h3><span>${H.t.toLowerCase()} · ${H.sub}</span></div>${list.length ? list.map((p, i) => pickRow(p, i, H)).join("") : `<p class="note">No ${PK.bsCls} currently qualifies as a ${side} for this horizon (${side === "buy" ? "needs an uptrend" : "needs a downtrend"}).</p>`}</section>`;
+  return `<section class="bs"><div class="bshead"><div><h2>${PK.bsCls === "forex" ? "Forex" : "Crypto"} — best Buy &amp; Sell signals</h2>
+    <p class="note">Buys come only from uptrends, sells only from downtrends. ${PK.bsCls === "forex" ? "BUY = buy the first currency (e.g. EUR/USD buy = long euro); SELL = sell the first currency." : "SELL means a short position (futures/margin) or exiting a holding."} Use the ATR stop shown on each pick to define risk.</p></div>
+    <div class="bsctl"><div class="view" id="bsCls"><button data-c="forex" class="${PK.bsCls === "forex" ? "on" : ""}">Forex</button><button data-c="crypto" class="${PK.bsCls === "crypto" ? "on" : ""}">Crypto</button></div>
+    <div class="view" id="bsH">${HORIZONS.map((x) => `<button data-h="${x.id}" class="${x.id === PK.bsH ? "on" : ""}">${x.t}</button>`).join("")}</div></div></div>
+    <div class="bsgrid">${col(buys, "buy")}${col(sells, "sell")}</div></section>`;
 }
 function renderPicks() {
   const reg = S.data.regime || {};
   const eq = reg.equity ? reg.equity[0] : null, cr = reg.crypto ? reg.crypto[0] : null;
   let warn = "";
   if (eq === "Risk-off" || cr === "Risk-off") warn = `<div class="pkwarn">⚠ Market backdrop: equities <b>${eq || "–"}</b>, crypto <b>${cr || "–"}</b>. In risk-off conditions even the best-ranked longs fail more often — consider smaller size or waiting.</div>`;
-  let h = `<div class="pkhead"><div><h2>Top 5 picks by holding period</h2><p class="note">Ranked from today's data (${new Date(S.data.generated).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}). Only assets in an uptrend, not in distress; short horizons also skip overextended moves. Click any pick for its chart and forecast.</p></div>
-    <label class="pkuni">Universe <select id="pkUni">${[["tradeable", "Stocks + ETFs + Crypto"], ["all", "Everything incl. Forex"], ["stocks", "Stocks"], ["etfs", "ETFs"], ["crypto", "Crypto"], ["forex", "Forex"], ["indices", "Indices"]].map(([v, l]) => `<option value="${v}" ${PK.universe === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>${warn}<div class="pkgrid">`;
-  const clsLabel = { stocks: "Stock", etfs: "ETF", crypto: "Crypto", indices: "Index", forex: "Forex" };
+  let h = `<div class="pkhead"><div><h2>Top Picks</h2><p class="note">Ranked from today's data (${new Date(S.data.generated).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}). Only assets in an uptrend, not in distress; short horizons also skip overextended moves. Click any pick for its chart and forecast.</p></div>
+    <label class="pkuni">Universe <select id="pkUni">${[["tradeable", "Stocks + ETFs + Crypto"], ["all", "Everything incl. Forex"], ["stocks", "Stocks"], ["etfs", "ETFs"], ["crypto", "Crypto"], ["forex", "Forex"], ["indices", "Indices"]].map(([v, l]) => `<option value="${v}" ${PK.universe === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>${warn}${renderBuySell()}<h2 class="pksec">Top 5 buys by holding period</h2><div class="pkgrid">`;
   HORIZONS.forEach((H) => {
     const picks = topPicks(H);
     h += `<section class="pkcard"><div class="pkt"><h3>${H.t}</h3><span>${H.sub}</span></div>`;
     if (!picks.length) h += `<p class="note">No asset currently passes the filters for this horizon.</p>`;
-    picks.forEach((p, i) => {
-      const r = p.r, f = p.pc.f, fc = r.fc;
-      const tgt = fc ? niceD(isoD(addBars(fc.asof, p.pc.steps, fc.calendar))) : "";
-      h += `<div class="pk" data-s="${r.sym}">
-        <div class="pkrank">${i + 1}</div>
-        <div class="pkmain">
-          <div class="pkline"><span class="sym">${disp(r)}</span><span class="chip">${clsLabel[r._cls]}</span><span class="pkname">${r.name || ""}</span></div>
-          <div class="pkline mono"><span>${fmt.px(r.price)}</span>${f ? `<span class="mute">→ ${tgt}</span><b>${fmt.px(f.med)}</b><span class="${cls(f.chg)}">${fmt.pct(f.chg)}</span><span class="mute">80%: ${fmt.px(f.lo80)}–${fmt.px(f.hi80)}</span>` : ""}</div>
-          <div class="chips">${reasons(r, H, p.pc).map((x) => `<span class="chip g">${x}</span>`).join("")}</div>
-        </div>
-        <div class="pkscore"><div class="v">${p.ps.toFixed(0)}</div><div class="l">rank score</div></div>
-      </div>`;
-    });
+    picks.forEach((p, i) => { h += pickRow(p, i, H); });
     h += `</section>`;
   });
   h += `</div><p class="note">${PK.universe === "forex" || PK.universe === "all" ? "Forex picks are <b>buy the first currency</b> of the pair (e.g. EUR/USD = buy euro, sell dollar). " : ""}How each list is ranked: <b>Daily/Weekly</b> favour entry timing (pullbacks in uptrends, oversold RSI(2)), trend, volume, short-range forecast odds and the asset's past forecast hit rate; Weekly also rewards a strong cycle low that is due. <b>Monthly</b> blends the composite score, momentum, forecast odds, hit rate and relative strength. <b>3/6/12 months</b> lean on medium-term momentum, trend, relative strength and (for stocks) Piotroski/Altman quality; leveraged/inverse ETFs are excluded from Monthly and longer lists because they decay over long holds. These are rankings, not guarantees — the further out, the wider the range.</p>`;
   $("picks").innerHTML = h;
   $("pkUni").onchange = (e) => { PK.universe = e.target.value; renderPicks(); };
+  $("bsCls").onclick = (e) => { const c = e.target.dataset.c; if (c) { PK.bsCls = c; renderPicks(); } };
+  $("bsH").onclick = (e) => { const x = e.target.dataset.h; if (x) { PK.bsH = x; renderPicks(); } };
   $("picks").querySelectorAll(".pk").forEach((el) => (el.onclick = () => openDetail(el.dataset.s)));
 }
 
