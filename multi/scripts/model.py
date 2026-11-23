@@ -79,8 +79,12 @@ def _spearman(a, b):
     return float(pd.Series(a).rank().corr(pd.Series(b).rank()))
 
 
-def fit_group(feat_by_sym: dict):
-    """feat_by_sym: {sym: features() frame}. Returns (per_symbol, group_stats)."""
+def fit_group(feat_by_sym: dict, center: bool = False):
+    """feat_by_sym: {sym: features() frame}. Returns (per_symbol, group_stats).
+
+    center=True (forex, crypto): no reliable built-in drift, so forecasts are centred on zero and
+    only the model's tilt relative to its own average is used. Equities keep their historical drift
+    (the equity risk premium)."""
     per_sym = {s: {"mz": {}, "hit21": None, "n21": 0} for s in feat_by_sym}
     stats = {}
     for h in HORIZONS:
@@ -136,9 +140,13 @@ def fit_group(feat_by_sym: dict):
         # final model on everything; residual grid from all data
         X, y = D[FEATS].values, D["y"].values
         b = _ridge(X, y)
-        res = y - k * _pred(b, X)
+        p_all = _pred(b, X)
+        off = float(np.mean(p_all)) if center else 0.0
+        res = y - k * (p_all - off)
         g = np.percentile(res, GRID_P)
         g50 = g[GRID_P.index(50)]
+        if center:
+            g, g50 = g - g50, 0.0
         grid = (g50 + (g - g50) * widen).tolist()
         stats[str(h)] = {
             "n": int(len(D)), "n_oos": int(len(te)), "ic_in": None if np.isnan(ic_in) else round(ic_in, 4),
@@ -153,7 +161,7 @@ def fit_group(feat_by_sym: dict):
             last = f[FEATS].dropna()
             if last.empty or last.index[-1] != f.index[-1]:
                 continue
-            per_sym[s]["mz"][str(h)] = round(float(k * _pred(b, last.values[-1:])[0]), 4)
+            per_sym[s]["mz"][str(h)] = round(float(k * (_pred(b, last.values[-1:])[0] - off)), 4)
         if h == 21:
             p_te_k = k * p_te
             for s in feat_by_sym:

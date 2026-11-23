@@ -434,7 +434,7 @@ def build(frames=None, fundamentals=None, sentiment=None):
     msym = {}
     for g, xd in xs.items():
         try:
-            per, stats = MDL.fit_group({s: MDL.features(x) for s, x in xd.items()})
+            per, stats = MDL.fit_group({s: MDL.features(x) for s, x in xd.items()}, center=(g != "equity"))
             msym.update(per)
             result["model"][g] = stats
             print(g, {h: (v["ic_oos"], v["hit_oos"], v["k"]) for h, v in stats["h"].items()})
