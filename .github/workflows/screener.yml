@@ -43,6 +43,7 @@ jobs:
           mkdir -p site/multi
           cp -r multi/index.html multi/app.js multi/style.css multi/vendor multi/data site/multi/
           touch site/.nojekyll
+          sed -i "s/__V__/${GITHUB_RUN_ID}/g" site/multi/index.html
       - name: Save plan and results history
         run: |
           git config user.name "github-actions[bot]"
