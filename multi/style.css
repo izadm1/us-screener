@@ -160,3 +160,24 @@ tbody tr.sel{background:rgba(91,140,255,.10)}
 .sigchip{font:600 11px var(--sans);padding:3px 8px;border-radius:6px;letter-spacing:.3px}
 .sigchip.sb{background:rgba(34,195,142,.15);color:var(--up)} .sigchip.ss{background:rgba(240,86,91,.15);color:var(--down)}
 @media (max-width:900px){.bsgrid{grid-template-columns:1fr}}
+.plan{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:12px 0;background:var(--panel)}
+.plan.sb,.plan.sb2{border-color:rgba(34,195,142,.5);background:linear-gradient(180deg,rgba(34,195,142,.08),var(--panel))}
+.plan.ss,.plan.ss2{border-color:rgba(240,86,91,.5);background:linear-gradient(180deg,rgba(240,86,91,.08),var(--panel))}
+.planhead{display:flex;justify-content:space-between;align-items:flex-end;gap:12px}
+.plan .l{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.4px}
+.plan .big{font:700 24px var(--sans)}
+.plan.sb .big,.plan.sb2 .big{color:var(--up)} .plan.ss .big,.plan.ss2 .big{color:var(--down)} .plan.sn .big{color:var(--warn)}
+.conv{min-width:160px;text-align:right}
+.conv .cv{font:600 18px var(--mono)}
+.conv .bar{position:relative;height:6px;border-radius:3px;background:linear-gradient(90deg,var(--down),var(--line) 50%,var(--up));margin-top:4px}
+.conv .bar i{position:absolute;top:-3px;width:3px;height:12px;background:#fff;border-radius:2px;transform:translateX(-50%)}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px}
+.pgrid .v{font:600 15px var(--mono)} .pgrid .s{font:11px var(--mono);color:var(--mute)}
+.why{margin:10px 0 0;padding-left:18px;color:var(--mute);font-size:12px}
+.expect{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:6px 0 10px}
+.ex{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+.ex.main{border-color:var(--acc)}
+.ex .l{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.3px}
+.ex .v{font:600 15px var(--mono)} .ex .s{font:11px var(--mono);color:var(--mute)}
+.ex div:nth-child(3){font:12px var(--mono)}
+.sigchip.sb2{background:var(--up);color:#06281c} .sigchip.ss2{background:var(--down);color:#2a0709} .sigchip.sn{background:var(--panel2);color:var(--mute)}

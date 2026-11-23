@@ -138,13 +138,17 @@ def future_dates(last: pd.Timestamp, n: int, calendar: bool):
     return pd.bdate_range(last + pd.Timedelta(days=1), periods=n)
 
 
-def forecast(close: pd.Series, calendar: bool):
-    """calendar=True for crypto (trades every day), else business days."""
+def forecast(close: pd.Series, calendar: bool, msym: dict, grp: str):
+    """Assemble the per-symbol forecast block.
+
+    Direction and ranges come from the pooled model (model.py): msym = {"mz": {h: z}, "sigma",
+    "hit21", "n21"}. The dominant cycle is added on top only when its own walk-forward test
+    on this symbol beat the no-cycle forecast.
+    """
     logc = np.log(close.dropna().values.astype(float))
     if len(logc) < 120:
         return None
     p0 = float(np.exp(logc[-1]))
-    mu, sig = drift_vol(logc)
     cyc = dominant_cycle(logc)
     bt = backtest(logc)
     use_cycle = bool(cyc and bt and cyc["strength"] >= 0.25
@@ -152,17 +156,6 @@ def forecast(close: pd.Series, calendar: bool):
                      and bt["mae_cycle"] <= bt["mae_drift"])
     last = close.dropna().index[-1]
     dates = future_dates(last, 63 * 2, calendar)
-    hz = {}
-    for h in HORIZONS:
-        m = mu * h + (cycle_delta(cyc, h) if use_cycle else 0.0)
-        s = sig * math.sqrt(h)
-        hz[str(h)] = {
-            "date": dates[h - 1].strftime("%Y-%m-%d"),
-            "med": p0 * math.exp(m),
-            "lo80": p0 * math.exp(m - Z80 * s), "hi80": p0 * math.exp(m + Z80 * s),
-            "lo50": p0 * math.exp(m - Z50 * s), "hi50": p0 * math.exp(m + Z50 * s),
-            "pup": _norm_cdf(m / s) if s else 0.5,
-        }
     turns = []
     if cyc and cyc["strength"] >= 0.15:
         for h, kind in next_turns(cyc):
@@ -170,9 +163,8 @@ def forecast(close: pd.Series, calendar: bool):
             if 1 <= k <= len(dates):
                 turns.append({"date": dates[k - 1].strftime("%Y-%m-%d"), "type": kind, "bars": k})
     return {
-        "p0": p0, "asof": last.strftime("%Y-%m-%d"), "mu": mu, "sigma": sig, "calendar": calendar,
-        "cycle": cyc, "use_cycle": use_cycle,
-        "acc": None if not bt else {"dir": bt["dir_cycle"] if use_cycle else bt["dir_drift"],
-                                    "cov80": bt["cov80_cycle"] if use_cycle else bt["cov80"],
-                                    "err": bt["mae_cycle"] if use_cycle else bt["mae_drift"]}, "h": hz, "turns": turns, "bt": bt,
+        "p0": p0, "asof": last.strftime("%Y-%m-%d"), "calendar": calendar, "grp": grp,
+        "sigma": msym.get("sigma"), "mz": msym.get("mz", {}),
+        "cycle": cyc, "use_cycle": use_cycle, "turns": turns,
+        "acc": {"dir": msym["hit21"], "n": msym["n21"], "h": 21} if msym.get("hit21") is not None else None,
     }

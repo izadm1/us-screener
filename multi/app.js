@@ -28,15 +28,122 @@ function Phi(x) { // standard normal CDF
 }
 function cycTerm(fc, h) {
   if (!fc.use_cycle || !fc.cycle) return 0;
-  const w = 2 * Math.PI / fc.cycle.period;
-  return fc.cycle.amp * (Math.sin(fc.cycle.phase + w * h) - Math.sin(fc.cycle.phase));
+  const w = 2 * Math.PI / fc.cycle.period, decay = Math.exp(-h / (1.5 * fc.cycle.period));
+  return decay * fc.cycle.amp * (Math.sin(fc.cycle.phase + w * h) - Math.sin(fc.cycle.phase));
+}
+/* Model-based forecast (scripts/model.py): mz = predicted vol-normalised return per horizon,
+   q = empirical residual quantiles at GRID_P percentiles. Interpolated in log(h) between horizons. */
+const HZ = [1, 5, 21, 63, 126, 252];
+const GRID_P = [1, 2.5, 5, 10, 16, 25, 37.5, 50, 62.5, 75, 84, 90, 95, 97.5, 99];
+const NORM_Q = [-2.326, -1.96, -1.645, -1.2816, -0.994, -0.674, -0.319, 0, 0.319, 0.674, 0.994, 1.2816, 1.645, 1.96, 2.326];
+const grpH = (fc) => ((S.data.model || {})[fc.grp] || {}).h || {};
+function interpH(h, get) {
+  const hs = HZ.filter((x) => get(x) != null);
+  if (!hs.length) return null;
+  if (h <= hs[0]) return get(hs[0]);
+  if (h >= hs[hs.length - 1]) return get(hs[hs.length - 1]);
+  for (let i = 0; i < hs.length - 1; i++) {
+    const a = hs[i], b = hs[i + 1];
+    if (h >= a && h <= b) {
+      const w = (Math.log(h) - Math.log(a)) / (Math.log(b) - Math.log(a)), va = get(a), vb = get(b);
+      return Array.isArray(va) ? va.map((v, k) => v + w * (vb[k] - v)) : va + w * (vb - va);
+    }
+  }
+  return get(hs[hs.length - 1]);
+}
+function qCdf(q, x) { // P(resid <= x) from the quantile grid
+  if (x <= q[0]) return GRID_P[0] / 100 * Math.exp(x - q[0]);
+  if (x >= q[q.length - 1]) return 1 - (1 - GRID_P[GRID_P.length - 1] / 100) * Math.exp(q[q.length - 1] - x);
+  for (let i = 0; i < q.length - 1; i++) if (x <= q[i + 1]) return (GRID_P[i] + (GRID_P[i + 1] - GRID_P[i]) * (x - q[i]) / ((q[i + 1] - q[i]) || 1e-9)) / 100;
+  return 1;
+}
+function model(fc, h) {
+  const st = grpH(fc);
+  const mz = interpH(h, (x) => (fc.mz && fc.mz[x] != null ? fc.mz[x] : null)) ?? 0;
+  const q = interpH(h, (x) => (st[x] ? st[x].q : null)) || NORM_Q;
+  return { mz, q, s: (fc.sigma || 0.02) * Math.sqrt(Math.max(h, 1e-9)), cyc: cycTerm(fc, h) };
 }
 function fcAt(fc, h) {
-  const m = fc.mu * h + cycTerm(fc, h), s = fc.sigma * Math.sqrt(h);
-  const e = (z) => fc.p0 * Math.exp(m + z * s);
-  return { h, med: e(0), lo80: e(-1.2816), hi80: e(1.2816), lo50: e(-0.6745), hi50: e(0.6745), pup: s ? Phi(m / s) : 0.5, chg: Math.exp(m) - 1 };
+  if (h <= 0) { const p = fc.p0; return { h: 0, med: p, lo50: p, hi50: p, lo80: p, hi80: p, lo90: p, hi90: p, pup: 0.5, chg: 0, exp: 0 }; }
+  const m = model(fc, h);
+  const px = (i) => fc.p0 * Math.exp((m.mz + m.q[i]) * m.s + m.cyc);
+  const med = px(7);
+  return { h, med, lo50: px(5), hi50: px(9), lo80: px(3), hi80: px(11), lo90: px(2), hi90: px(12), lo98: px(0), hi98: px(14),
+    pup: 1 - qCdf(m.q, -m.mz - m.cyc / m.s), chg: med / fc.p0 - 1, exp: Math.exp(m.mz * m.s + m.cyc) - 1, s: m.s };
+}
+function probAbove(fc, h, price) { // chance the closing price on that date is above `price`
+  if (h <= 0) return fc.p0 > price ? 1 : 0;
+  const m = model(fc, h);
+  return 1 - qCdf(m.q, (Math.log(price / fc.p0) - m.cyc) / m.s - m.mz);
+}
+function modelStats(fc, h) { // nearest validated horizon for this asset group
+  const st = grpH(fc); let best = null, d = 1e9;
+  HZ.forEach((x) => { if (st[x] && Math.abs(Math.log(h || 1) - Math.log(x)) < d) { d = Math.abs(Math.log(h || 1) - Math.log(x)); best = { h: x, ...st[x] }; } });
+  return best;
 }
 const fcFor = (r) => r.fc ? fcAt(r.fc, barsBetween(r.fc.asof, S.fdate, r.fc.calendar)) : null;
+/* ---------------- trade plan: signal, entry, stop, targets ---------------- */
+const SIG_COL = { "STRONG BUY": "sb2", BUY: "sb", NEUTRAL: "sn", SELL: "ss", "STRONG SELL": "ss2" };
+function tradePlan(r, h) {
+  const fc = r.fc;
+  if (!fc || !r.price) return null;
+  h = Math.max(1, h || 1);
+  const f = fcAt(fc, h), ms = r.ms || {}, price = r.price;
+  const atr = (r.atr_pct || 0.02) * price;
+  const tUp = r.above200 == null ? r.st_dir === 1 : r.above200 && r.st_dir === 1;
+  const tDn = r.above200 == null ? r.st_dir === -1 : r.above200 === false && r.st_dir === -1;
+  const wk = ms.wk_trend || 0;
+  const struct = /HH\/HL/.test(ms.structure || "") ? 1 : /LH\/LL/.test(ms.structure || "") ? -1 : 0;
+  const prob = Math.max(-1, Math.min(1, (f.pup - 0.5) / 0.15));
+  const conv = Math.round(100 * (0.5 * prob + 0.25 * (tUp ? 1 : tDn ? -1 : 0) + 0.15 * wk + 0.10 * struct));
+  let sig = conv >= 55 ? "STRONG BUY" : conv >= 25 ? "BUY" : conv <= -55 ? "STRONG SELL" : conv <= -25 ? "SELL" : "NEUTRAL";
+  if (sig.includes("BUY") && tDn && wk === -1) sig = "NEUTRAL";      // never buy against daily + weekly downtrend
+  if (sig.includes("SELL") && tUp && wk === 1) sig = "NEUTRAL";      // never sell against daily + weekly uptrend
+  const why = [];
+  why.push(`${Math.round(f.pup * 100)}% chance higher by target date`);
+  why.push(tUp ? "Daily trend up (above 200-day, ATR trail long)" : tDn ? "Daily trend down (below 200-day, ATR trail short)" : "Daily trend mixed");
+  why.push(wk === 1 ? "Weekly trend up" : wk === -1 ? "Weekly trend down" : "Weekly trend flat/unclear");
+  if (ms.structure) why.push(`Structure: ${ms.structure}${ms.bos ? ` · ${ms.bos} break of structure` : ""}`);
+  const plan = { sig, conv, f, h, why, atr };
+  const dir = sig.includes("BUY") ? 1 : sig.includes("SELL") ? -1 : 0;
+  plan.dir = dir;
+  const sup = (ms.sup || []).map((x) => x.price), res = (ms.res || []).map((x) => x.price);
+  if (dir === 1) {
+    const near = sup.find((p) => p > price - 1.2 * atr);
+    plan.entryLo = Math.max(price - 0.5 * atr, near ? near : -Infinity); plan.entryHi = price;
+    const cands = [r.st_dir === 1 ? r.st_stop : null, ms.swing_lo20 != null ? ms.swing_lo20 - 0.25 * atr : null, sup[0] != null ? sup[0] - 0.25 * atr : null]
+      .filter((x) => x != null && x < price - 1.0 * atr && x > price - 3.5 * atr);
+    plan.stop = cands.length ? Math.max(...cands) : price - 2 * atr;
+    const T = [f.med, fcAt(fc, h).hi50, f.hi80];
+    if (T[0] <= price + 0.3 * atr) T[0] = res.find((p) => p > price + 0.5 * atr) ?? price + 1.5 * (price - plan.stop);
+    plan.targets = T.map((t, i) => Math.max(t, i ? T[i - 1] : t)).map((t) => ({ price: t, p: probAbove(fc, h, t) }));
+    plan.risk = price - plan.stop;
+    plan.pStop = 1 - probAbove(fc, h, plan.stop);
+    plan.obstacle = res.find((p) => p > price && p < plan.targets[0].price);
+  } else if (dir === -1) {
+    const near = res.find((p) => p < price + 1.2 * atr);
+    plan.entryLo = price; plan.entryHi = Math.min(price + 0.5 * atr, near ? near : Infinity);
+    const cands = [r.st_dir === -1 ? r.st_stop : null, ms.swing_hi20 != null ? ms.swing_hi20 + 0.25 * atr : null, res[0] != null ? res[0] + 0.25 * atr : null]
+      .filter((x) => x != null && x > price + 1.0 * atr && x < price + 3.5 * atr);
+    plan.stop = cands.length ? Math.min(...cands) : price + 2 * atr;
+    const T = [f.med, f.lo50, f.lo80];
+    if (T[0] >= price - 0.3 * atr) T[0] = sup.find((p) => p < price - 0.5 * atr) ?? price - 1.5 * (plan.stop - price);
+    plan.targets = T.map((t, i) => Math.min(t, i ? T[i - 1] : t)).map((t) => ({ price: t, p: 1 - probAbove(fc, h, t) }));
+    plan.risk = plan.stop - price;
+    plan.pStop = probAbove(fc, h, plan.stop);
+    plan.obstacle = sup.find((p) => p < price && p > plan.targets[0].price);
+  }
+  if (dir) {
+    plan.targets.forEach((t) => (t.R = Math.abs(t.price - price) / plan.risk));
+    plan.rr = plan.targets[1].R;
+    plan.size = 1 / (plan.risk / price * 100) * 100; // % of account for 1% risk
+  } else {
+    plan.waitLong = res[0] ?? ms.swing_hi20; plan.waitShort = sup[0] ?? ms.swing_lo20;
+  }
+  return plan;
+}
+const planFor = (r) => (r.fc ? tradePlan(r, barsBetween(r.fc.asof, S.fdate, r.fc.calendar)) : null);
+const sigChip = (p) => p ? `<span class="sigchip ${SIG_COL[p.sig]}" title="Conviction ${p.conv > 0 ? "+" : ""}${p.conv}">${p.sig}</span>` : '<span class="mute">—</span>';
 const nextTurn = (r) => (r.fc && r.fc.turns && r.fc.turns[0]) || null;
 
 const disp = (r) => r.label || r.sym.replace(/\d{3,}-USD$/, "-USD");
@@ -49,6 +156,9 @@ const cls = (v) => v == null ? "mute" : v > 0 ? "up" : v < 0 ? "down" : "mute";
 const chipColor = { "Cycle trough due": "g", "Cycle peak due": "y", "Strong trend": "g", "Breakout": "b", "Pullback in uptrend": "g", "RSI(2) oversold": "y", "Overextended": "y", "Bullish divergence": "g", "Bearish divergence": "r", "Downtrend": "r", "Distress risk": "r" };
 
 const PRESETS = {
+  "Strong buys": { plan: "STRONG BUY" },
+  "All buys": { plan: "BUY" },
+  "Sells": { plan: "SELL" },
   "Highest P(up)": { sort: "pup" },
   "Biggest est. gain": { sort: "fchg" },
   "Cycle trough due": { sig: "Cycle trough due" },
@@ -66,13 +176,13 @@ const COLS = [
   { k: "sym", t: "Symbol", f: (r) => `<span class="sym">${disp(r)}</span><span class="nm">${r.name || ""}${r.group ? " · " + r.group : ""}</span>` },
   { k: "price", t: "Price", f: (r) => fmt.px(r.price) },
   { k: "chg1d", t: "1D", f: (r) => `<span class="${cls(r.chg1d)}">${fmt.pct(r.chg1d)}</span>` },
-  { k: "bs", t: "Signal (1W)", only: ["forex", "crypto"], f: (r) => { const s = signalOf(r); return s ? `<span class="sigchip ${s.side === "BUY" ? "sb" : "ss"}">${s.ps >= 80 ? "STRONG " : ""}${s.side}</span>` : '<span class="mute">—</span>'; } },
-  { k: "fmed", t: "Est. price", v: "forecast", f: (r) => r._f ? `<b>${fmt.px(r._f.med)}</b>` : "–" },
+  { k: "bs", t: "Signal", f: (r) => sigChip(r._p) },
+  { k: "fmed", t: "Base case", v: "forecast", f: (r) => r._f ? `<b>${fmt.px(r._f.med)}</b>` : "–" },
   { k: "fchg", t: "Est. Δ", v: "forecast", f: (r) => r._f ? `<span class="${cls(r._f.chg)}">${fmt.pct(r._f.chg)}</span>` : "–" },
-  { k: "frng", t: "80% range", v: "forecast", sortable: false, f: (r) => r._f ? `<span class="rng">${fmt.px(r._f.lo80)} – ${fmt.px(r._f.hi80)}</span>` : "–" },
+  { k: "frng", t: "Likely range (50%)", v: "forecast", sortable: false, f: (r) => r._f ? `<span class="rng">${fmt.px(r._f.lo50)} – ${fmt.px(r._f.hi50)}</span>` : "–" },
   { k: "pup", t: "P(higher)", v: "forecast", f: (r) => r._f ? `<span class="${r._f.pup >= 0.6 ? "up" : r._f.pup <= 0.4 ? "down" : ""}">${(r._f.pup * 100).toFixed(0)}%</span>` : "–" },
   { k: "turn", t: "Next cycle turn", v: "forecast", f: (r) => turnCell(r) },
-  { k: "acc", t: "Past hit rate", v: "forecast", f: (r) => accCell(r) },
+  { k: "acc", t: "Model hit rate", v: "forecast", f: (r) => accCell(r) },
   { k: "chg5d", v: "tech", t: "5D", f: (r) => `<span class="${cls(r.chg5d)}">${fmt.pct(r.chg5d)}</span>` },
   { k: "chg1m", v: "tech", t: "1M", f: (r) => `<span class="${cls(r.chg1m)}">${fmt.pct(r.chg1m)}</span>` },
   { k: "score", t: "Score", f: (r) => scoreBar(r.score) },
@@ -98,7 +208,7 @@ function turnCell(r) {
 function accCell(r) {
   const a = r.fc && r.fc.acc;
   if (!a) return "–";
-  return `<span class="acc ${a.dir >= 0.6 ? "up" : a.dir < 0.5 ? "down" : "warn"}" title="Direction right ${(a.dir * 100).toFixed(0)}% of the time over ${r.fc.bt.n} past ${r.fc.bt.h}-bar forecasts; actual price stayed inside the 80% range ${(a.cov80 * 100).toFixed(0)}% of the time">${(a.dir * 100).toFixed(0)}%</span>`;
+  return `<span class="acc ${a.dir >= 0.6 ? "up" : a.dir < 0.5 ? "down" : "warn"}" title="Out-of-sample test over the last year: the model's 1-month direction call for this asset was right ${(a.dir * 100).toFixed(0)}% of the time (${a.n} daily calls)">${(a.dir * 100).toFixed(0)}%</span>`;
 }
 function scoreBar(s) {
   if (s == null) return "–";
@@ -184,6 +294,7 @@ function buildControls() {
       if (cfg.sig) $("sig").value = cfg.sig;
       if (cfg.sort) { S.sort = { key: cfg.sort, dir: -1 }; setView("forecast"); }
       if (cfg.acc) setView("forecast");
+      if (cfg.plan) { setView("forecast"); S.sort = { key: "bs", dir: cfg.plan === "SELL" ? 1 : -1 }; }
     }
     [...$("presets").children].forEach((b) => b.classList.toggle("on", b.dataset.p === p && p !== ""));
     render();
@@ -222,7 +333,7 @@ function resetFilters() {
 /* ---------------- table ---------------- */
 function rows() {
   let r = (S.data.classes[S.cls] || []).slice();
-  r.forEach((x) => (x._f = fcFor(x)));
+  r.forEach((x) => { x._f = fcFor(x); x._p = planFor(x); });
   const q = $("q").value.trim().toLowerCase();
   const min = +$("minScore").value, rmin = +$("rsiMin").value, rmax = +$("rsiMax").value, sig = $("sig").value;
   $("minScoreV").textContent = min;
@@ -234,12 +345,13 @@ function rows() {
     (!$("upOnly").checked || x.above200 === true) &&
     (!$("noExt").checked || !(x.signals || []).includes("Overextended")) &&
     (!(S.preset && PRESETS[S.preset].quality) || (x.fscore ?? 0) >= 6) &&
-    (!(S.preset && PRESETS[S.preset].acc) || ((x.fc && x.fc.acc && x.fc.acc.dir) || 0) >= PRESETS[S.preset].acc));
+    (!(S.preset && PRESETS[S.preset].acc) || ((x.fc && x.fc.acc && x.fc.acc.dir) || 0) >= PRESETS[S.preset].acc) &&
+    (!(S.preset && PRESETS[S.preset].plan) || (x._p && (PRESETS[S.preset].plan === "STRONG BUY" ? x._p.sig === "STRONG BUY" : x._p.sig.includes(PRESETS[S.preset].plan)))));
   const { key, dir } = S.sort;
   const val = (x) => {
     switch (key) {
       case "funding": return S.funding[futSym(x)];
-      case "bs": { const s = signalOf(x); return s ? (s.side === "BUY" ? s.ps : -s.ps) : 0; }
+      case "bs": return x._p ? x._p.conv : null;
       case "fmed": case "fchg": return x._f ? x._f.chg : null;
       case "pup": return x._f ? x._f.pup : null;
       case "acc": return x.fc && x.fc.acc ? x.fc.acc.dir : null;
@@ -486,36 +598,82 @@ async function openDetail(sym, keepScroll) {
   if (r._cls === "crypto") loadLS(r);
   drawChart(sym);
 }
+function planCard(r, plan) {
+  if (!plan) return "";
+  const px = fmt.px, pc = (v) => fmt.pct(v / r.price - 1, 2);
+  const unit = r.fc.calendar ? "days" : "trading days";
+  let h = `<div class="plan ${SIG_COL[plan.sig]}">
+    <div class="planhead"><div><div class="l">Signal to ${niceD(S.fdate)} (${plan.h} ${unit})</div><div class="big">${plan.sig}</div></div>
+    <div class="conv"><div class="l">Conviction</div><div class="cv">${plan.conv > 0 ? "+" : ""}${plan.conv}</div><div class="bar"><i style="left:${50 + plan.conv / 2}%"></i></div></div></div>`;
+  if (plan.dir) {
+    const side = plan.dir === 1 ? "Buy" : "Sell";
+    h += `<div class="pgrid">
+      <div><div class="l">${side} zone</div><div class="v">${px(plan.entryLo)} – ${px(plan.entryHi)}</div></div>
+      <div><div class="l">Stop loss</div><div class="v down">${px(plan.stop)}</div><div class="s">${pc(plan.stop)} · ${(plan.risk / plan.atr).toFixed(1)} ATR</div></div>
+      ${plan.targets.map((t, i) => `<div><div class="l">Target ${i + 1}${i === 0 ? " (base case)" : i === 1 ? " (good case)" : " (stretch)"}</div><div class="v up">${px(t.price)}</div><div class="s">${pc(t.price)} · ${t.R.toFixed(1)}R · ${Math.round(t.p * 100)}% chance</div></div>`).join("")}
+      <div><div class="l">Reward : risk (T2)</div><div class="v">${plan.rr.toFixed(2)} : 1</div></div>
+      <div><div class="l">Size for 1% account risk</div><div class="v">${Math.min(plan.size, 999).toFixed(0)}%</div><div class="s">of account (notional)</div></div>
+      <div><div class="l">Chance of closing past stop</div><div class="v">${Math.round(plan.pStop * 100)}%</div><div class="s">by ${niceD(S.fdate)}</div></div>
+    </div>`;
+    if (plan.obstacle) h += `<p class="note">⚠ ${plan.dir === 1 ? "Resistance" : "Support"} at ${px(plan.obstacle)} sits before Target 1 — expect a reaction there.</p>`;
+  } else {
+    h += `<p class="note" style="margin:8px 0 0">No trade: the odds and the trend don't line up. Watch for a close above <b>${px(plan.waitLong)}</b> (bullish trigger) or below <b>${px(plan.waitShort)}</b> (bearish trigger).</p>`;
+  }
+  h += `<ul class="why">${plan.why.map((w) => `<li>${w}</li>`).join("")}</ul></div>`;
+  return h;
+}
 function forecastSection(r) {
   const fc = r.fc;
   if (!fc) return `<h3>Forecast</h3><p class="note">Not enough history for a forecast.</p>`;
-  const f = fcFor(r);
+  const plan = planFor(r), f = plan ? plan.f : fcFor(r);
   const unit = fc.calendar ? "days" : "trading days";
-  let h = `<h3>Forecast for ${niceD(S.fdate)} <span class="mute" style="text-transform:none">(${f.h} ${unit} ahead)</span></h3>
-  <div class="buckets">
-    <div class="bk"><div class="l">Most likely</div><div class="v">${fmt.px(f.med)}</div><div class="${cls(f.chg)}" style="font:12px var(--mono)">${fmt.pct(f.chg)}</div></div>
-    <div class="bk"><div class="l">50% range</div><div class="v" style="font-size:14px">${fmt.px(f.lo50)} – ${fmt.px(f.hi50)}</div></div>
-    <div class="bk"><div class="l">80% range</div><div class="v" style="font-size:14px">${fmt.px(f.lo80)} – ${fmt.px(f.hi80)}</div></div>
-    <div class="bk"><div class="l">Chance higher</div><div class="v ${f.pup >= 0.6 ? "up" : f.pup <= 0.4 ? "down" : ""}">${(f.pup * 100).toFixed(0)}%</div></div>
+  const px = fmt.px;
+  let h = planCard(r, plan);
+  h += `<h3>Where the price is expected to be on ${niceD(S.fdate)} <span class="mute" style="text-transform:none">(${f.h} ${unit})</span></h3>
+  <div class="expect">
+    <div class="ex main"><div class="l">Base case (median)</div><div class="v">${px(f.med)}</div><div class="${cls(f.chg)}">${fmt.pct(f.chg, 2)}</div></div>
+    <div class="ex"><div class="l">Likely range · 50%</div><div class="v">${px(f.lo50)} – ${px(f.hi50)}</div><div class="s">1 in 2 chance it ends here</div></div>
+    <div class="ex"><div class="l">Wide range · 80%</div><div class="v">${px(f.lo80)} – ${px(f.hi80)}</div><div class="s">4 in 5 chance</div></div>
+    <div class="ex"><div class="l">Extreme range · 90%</div><div class="v">${px(f.lo90)} – ${px(f.hi90)}</div><div class="s">9 in 10 chance</div></div>
+    <div class="ex"><div class="l">Bull case (top 10%)</div><div class="v up">≥ ${px(f.hi80)}</div><div class="s">${fmt.pct(f.hi80 / r.price - 1)}</div></div>
+    <div class="ex"><div class="l">Bear case (bottom 10%)</div><div class="v down">≤ ${px(f.lo80)}</div><div class="s">${fmt.pct(f.lo80 / r.price - 1)}</div></div>
+    <div class="ex"><div class="l">Chance higher than today</div><div class="v ${f.pup >= 0.55 ? "up" : f.pup <= 0.45 ? "down" : ""}">${Math.round(f.pup * 100)}%</div></div>
+    <div class="ex"><div class="l">Expected move (±1σ)</div><div class="v">±${(f.s * 100).toFixed(1)}%</div><div class="s">±${px(r.price * f.s)}</div></div>
   </div>`;
-  const rows = [5, 10, 21, 63].map((k) => { const x = fcAt(fc, k); return `<tr><td>${niceD(isoD(addBars(fc.asof, k, fc.calendar)))}</td><td>+${k}</td><td>${fmt.px(x.med)}</td><td class="${cls(x.chg)}">${fmt.pct(x.chg)}</td><td>${fmt.px(x.lo80)} – ${fmt.px(x.hi80)}</td><td>${(x.pup * 100).toFixed(0)}%</td></tr>`; }).join("");
-  h += `<table class="fctable"><thead><tr><th>Date</th><th>Bars</th><th>Est. price</th><th>Change</th><th>80% range</th><th>P(higher)</th></tr></thead><tbody>${rows}</tbody></table>`;
-  const cy = fc.cycle;
-  if (fc.turns && fc.turns.length) {
-    h += `<h3>Projected cycle turning dates</h3><p class="note">Dominant cycle ≈ ${cy.period} ${fc.calendar ? "days" : "trading days"}, cycle strength ${(cy.strength * 100).toFixed(0)}% ${cy.strength < 0.3 ? "— <span class='warn'>weak, treat dates as rough</span>" : cy.strength >= 0.5 ? "— <span class='up'>clear cycle</span>" : ""}. Swing size ±${(cy.amp * 100).toFixed(1)}%.</p>
-    <div class="turns">${fc.turns.map((t) => `<span class="chip ${t.type === "trough" ? "g" : "r"}">${t.type === "trough" ? "▼ Low" : "▲ High"} ~ ${niceD(t.date)}</span>`).join("")}</div>`;
-  } else {
-    h += `<h3>Projected cycle turning dates</h3><p class="note">No reliable price cycle found — this asset is moving more like a trend or random walk, so no turning dates are projected.</p>`;
+  const hs = [[1, "1 day"], [5, "1 week"], [21, "1 month"], [63, "3 months"], [126, "6 months"], [252, "12 months"]].map(([k, l]) => [fc.calendar ? Math.round(k * 365 / 252) : k, l]);
+  h += `<table class="fctable"><thead><tr><th>Horizon</th><th>Date</th><th>Base case</th><th>Change</th><th>50% range</th><th>90% range</th><th>P(higher)</th></tr></thead><tbody>${hs.map(([k, l]) => { const x = fcAt(fc, k); return `<tr><td>${l}</td><td>${niceD(isoD(addBars(fc.asof, k, fc.calendar)))}</td><td><b>${px(x.med)}</b></td><td class="${cls(x.chg)}">${fmt.pct(x.chg, 2)}</td><td>${px(x.lo50)} – ${px(x.hi50)}</td><td>${px(x.lo90)} – ${px(x.hi90)}</td><td class="${x.pup >= 0.55 ? "up" : x.pup <= 0.45 ? "down" : ""}">${Math.round(x.pup * 100)}%</td></tr>`; }).join("")}</tbody></table>`;
+  const ms = modelStats(fc, f.h || 21);
+  if (ms) {
+    const edge = ms.k > 0 && ms.ic_oos > 0;
+    h += `<h3>How reliable is this forecast?</h3><div class="grid2">
+      <div class="kv"><span>Out-of-sample IC (${ms.h}-bar, last year)</span><span class="${ms.ic_oos >= 0.05 ? "up" : ms.ic_oos > 0 ? "warn" : "down"}">${ms.ic_oos == null ? "–" : ms.ic_oos.toFixed(3)}</span></div>
+      <div class="kv"><span>Direction hit rate (all ${fc.grp} assets)</span><span>${ms.hit_oos == null ? "–" : Math.round(ms.hit_oos * 100) + "%"} <span class="mute">vs ${Math.round(ms.base_up_oos * 100)}% up-days</span></span></div>
+      <div class="kv"><span>Outcomes inside 50% range</span><span>${Math.round(ms.cov50_oos * 100)}% <span class="mute">(target 50%)</span></span></div>
+      <div class="kv"><span>Outcomes inside 80% range</span><span>${Math.round(ms.cov80_oos * 100)}% <span class="mute">(target 80%)</span></span></div>
+      ${fc.acc ? `<div class="kv"><span>This asset: 1-month calls right</span><span class="${fc.acc.dir >= 0.6 ? "up" : fc.acc.dir < 0.5 ? "down" : "warn"}">${Math.round(fc.acc.dir * 100)}% (${fc.acc.n})</span></div>` : ""}
+      <div class="kv"><span>Model weight used</span><span>${Math.round(ms.k * 100)}%</span></div></div>
+      <p class="note">${edge ? "The model showed real skill on data it had not seen, so its directional tilt is used (scaled by the weight above)." : "<b>No proven edge at this horizon</b> — the model's direction is switched off and the forecast is centred on drift only; the ranges are still calibrated."} IC above 0.05 is considered meaningful in professional quant research.</p>`;
   }
-  if (fc.acc) {
-    const b = fc.bt;
-    h += `<h3>How accurate has this been?</h3><div class="grid2">
-      <div class="kv"><span>Direction right (past ${b.n} tests, ${b.h} bars ahead)</span><span class="${fc.acc.dir >= 0.6 ? "up" : fc.acc.dir < 0.5 ? "down" : "warn"}">${(fc.acc.dir * 100).toFixed(0)}%</span></div>
-      <div class="kv"><span>Price landed inside 80% range</span><span>${(fc.acc.cov80 * 100).toFixed(0)}%</span></div>
-      <div class="kv"><span>Average miss vs actual</span><span>${(fc.acc.err * 100).toFixed(1)}%</span></div>
-      <div class="kv"><span>Model used</span><span>${fc.use_cycle ? "trend + cycle" : "trend only"}</span></div></div>
-      <p class="note">A coin-flip scores 50%. Results above ~60% are meaningful; below 50% means ignore the direction and use only the range.</p>`;
-  }
+  return h + structureSection(r);
+}
+function structureSection(r) {
+  const ms = r.ms || {}, px = fmt.px;
+  const kv = (k, v) => `<div class="kv"><span>${k}</span><span>${v}</span></div>`;
+  const wk = ms.wk_trend === 1 ? '<span class="up">Up</span>' : ms.wk_trend === -1 ? '<span class="down">Down</span>' : "Flat / unclear";
+  const daily = r.above200 && r.st_dir === 1 ? '<span class="up">Up</span>' : r.above200 === false && r.st_dir === -1 ? '<span class="down">Down</span>' : "Mixed";
+  const vr = ms.atr_pctile == null ? "–" : ms.atr_pctile > 0.8 ? `<span class="warn">High (${Math.round(ms.atr_pctile * 100)}th pct)</span>` : ms.atr_pctile < 0.2 ? `Low (${Math.round(ms.atr_pctile * 100)}th pct) — squeeze` : `Normal (${Math.round(ms.atr_pctile * 100)}th pct)`;
+  let h = `<h3>Market structure</h3><div class="grid2">
+    ${kv("Daily trend / Weekly trend", `${daily} / ${wk}`)}${kv("Swing structure", ms.structure || "–")}
+    ${kv("Break of structure", ms.bos ? `<span class="${ms.bos === "bullish" ? "up" : "down"}">${ms.bos}</span>` : "none")}${kv("Volatility regime (ATR)", vr)}
+    ${kv("Realised volatility (annual)", ms.rvol_ann != null ? (ms.rvol_ann * 100).toFixed(1) + "%" : "–")}${kv("Trend quality (R², 3 mo)", ms.trend_r2 != null ? `${ms.trend_r2.toFixed(2)} · slope ${fmt.pct(ms.trend_slope_ann, 0)}/yr` : "–")}
+    ${kv("Last swing high / low", `${px(ms.last_swing_high)} / ${px(ms.last_swing_low)}`)}${kv("20-day high / low", `${px(ms.swing_hi20)} / ${px(ms.swing_lo20)}`)}
+  </div>
+  <h3>Key levels</h3><div class="grid2">
+    <div>${(ms.res || []).slice().reverse().map((l) => kv(`Resistance (${l.touches} touch${l.touches > 1 ? "es" : ""})`, `<span class="down">${px(l.price)}</span> <span class="mute">${fmt.pct(l.price / r.price - 1)}</span>`)).join("") || kv("Resistance", "none nearby")}
+    ${kv("<b>Price</b>", `<b>${px(r.price)}</b>`)}
+    ${(ms.sup || []).map((l) => kv(`Support (${l.touches} touch${l.touches > 1 ? "es" : ""})`, `<span class="up">${px(l.price)}</span> <span class="mute">${fmt.pct(l.price / r.price - 1)}</span>`)).join("") || kv("Support", "none nearby")}</div>
+    <div>${ms.piv_w ? ["R2", "R1", "P", "S1", "S2"].map((k) => kv(`Weekly pivot ${k}`, px(ms.piv_w[k]))).join("") : ""}${ms.piv_d ? kv("Daily pivot P / R1 / S1", `${px(ms.piv_d.P)} / ${px(ms.piv_d.R1)} / ${px(ms.piv_d.S1)}`) : ""}</div>
+  </div>`;
   return h;
 }
 async function loadLS(r) {
@@ -641,16 +799,25 @@ async function drawTV(sym) {
   const last = h.c[n - 1], hi52 = Math.max(...h.h.slice(-252)), lo52 = Math.min(...h.l.slice(-252));
   const pl = (price, color, title, style = 2) => cs.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title });
   pl(hi52, "#8a93a3", "52W high"); pl(lo52, "#8a93a3", "52W low");
-  if (r.st_stop) pl(r.st_stop, r.st_dir === 1 ? "#22c38e" : "#f0565b", "ATR stop");
+  const ms = r.ms || {};
+  (ms.res || []).forEach((l, i) => pl(l.price, "rgba(240,86,91,.55)", `R${i + 1}`, 1));
+  (ms.sup || []).forEach((l, i) => pl(l.price, "rgba(34,195,142,.55)", `S${i + 1}`, 1));
+  const plan = fc ? tradePlan(r, barsBetween(fc.asof, S.fdate, fc.calendar)) : null;
+  if (plan && plan.dir) {
+    pl(plan.stop, "#f0565b", "STOP", 0);
+    plan.targets.forEach((t, i) => pl(t.price, "#22c38e", `T${i + 1}`, 0));
+  } else if (r.st_stop) pl(r.st_stop, r.st_dir === 1 ? "#22c38e" : "#f0565b", "ATR stop");
   // forecast cone + cycle turn markers
   let f = null, cyc = null;
   if (fc) {
     f = fcFor(r);
-    const med = [], hi = [], lo = [];
-    futT.forEach((t, j) => { const x = fcAt(fc, j + 1 + (fut.length - futT.length)); med.push(x.med); hi.push(x.hi80); lo.push(x.lo80); });
-    const ft = [h.t[n - 1]].concat(futT);
-    const ms = line([fc.p0].concat(med), "#e6e9ef", 2, 0, ft); line([fc.p0].concat(hi), "#5b8cff", 1, 2, ft); line([fc.p0].concat(lo), "#5b8cff", 1, 2, ft);
-    if (f && f.h > 0) pl(f.med, "#f2b33d", `Target ${niceD(S.fdate)}`, 0);
+    const med = [], h50 = [], l50 = [], h90 = [], l90 = [];
+    futT.forEach((t, j) => { const x = fcAt(fc, j + 1 + (fut.length - futT.length)); med.push(x.med); h50.push(x.hi50); l50.push(x.lo50); h90.push(x.hi90); l90.push(x.lo90); });
+    const ft = [h.t[n - 1]].concat(futT), p0 = [fc.p0];
+    line(p0.concat(h90), "rgba(91,140,255,.55)", 1, 2, ft); line(p0.concat(l90), "rgba(91,140,255,.55)", 1, 2, ft);
+    line(p0.concat(h50), "#5b8cff", 1, 0, ft); line(p0.concat(l50), "#5b8cff", 1, 0, ft);
+    const ms = line(p0.concat(med), "#e6e9ef", 2, 0, ft);
+    if (f && f.h > 0) pl(f.med, "#f2b33d", `Base ${niceD(S.fdate)}`, 0);
     cyc = cycleSeries(h, fc, futT);
     if (cyc) {
       const weak = fc.cycle.strength < 0.3;
@@ -714,7 +881,7 @@ async function drawTV(sym) {
     if (fc) { const k = futT.indexOf(p.time) + 1 + (fut.length - futT.length); const x = fcAt(fc, k); $("tvOhlc").innerHTML = `<span>${niceD(isoD(p.time * 1000))} (forecast)</span><span>Est. <b>${fmt.px(x.med)}</b></span><span>80% <b>${fmt.px(x.lo80)} – ${fmt.px(x.hi80)}</b></span><span>P(higher) <b>${(x.pup * 100).toFixed(0)}%</b></span>`; }
   });
 
-  $("tvLegend").innerHTML = `<span style="--c:#f2b33d">EMA 20</span><span style="--c:#5b8cff">EMA 50</span><span style="--c:#9b7bff">EMA 200</span><span style="--c:#8a93a3">Bollinger 20,2</span><span style="--c:#22c38e">ATR trail</span><span style="--c:#e6e9ef">Forecast</span><span style="--c:#5b8cff">80% range</span><span style="--c:#f2b33d">Cycle wave</span>`;
+  $("tvLegend").innerHTML = `<span style="--c:#f2b33d">EMA 20</span><span style="--c:#5b8cff">EMA 50</span><span style="--c:#9b7bff">EMA 200</span><span style="--c:#8a93a3">Bollinger 20,2</span><span style="--c:#22c38e">ATR trail</span><span style="--c:#e6e9ef">Forecast base case</span><span style="--c:#5b8cff">50% range (solid) · 90% (dashed)</span><span style="--c:#f0565b">Resistance R1–R3</span><span style="--c:#22c38e">Support S1–S3</span><span style="--c:#f2b33d">Cycle wave</span>`;
 
   // key levels
   const lv = (l, v, s = "") => `<div class="lv"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
@@ -726,12 +893,15 @@ async function drawTV(sym) {
     + lv("EMA 200", fmt.px(h.e200[n - 1]), h.e200[n - 1] ? vs(h.e200[n - 1]) : "")
     + lv("Bollinger band", `${fmt.px(bl[n - 1])} – ${fmt.px(bu[n - 1])}`, `σ-zone ${fmt.n(r.z20, 2)}`)
     + lv("ATR trail stop", fmt.px(r.st_stop), r.st_stop ? `${r.st_dir === 1 ? "long" : "short"} · ${vs(r.st_stop)}` : "");
-  if (f) L += lv(`Forecast ${niceD(S.fdate)}`, fmt.px(f.med), `80%: ${fmt.px(f.lo80)} – ${fmt.px(f.hi80)}`);
+  if (f) L += lv(`Base case ${niceD(S.fdate)}`, fmt.px(f.med), `50%: ${fmt.px(f.lo50)} – ${fmt.px(f.hi50)}`) + lv("90% range", `${fmt.px(f.lo90)} – ${fmt.px(f.hi90)}`, `P(higher) ${Math.round(f.pup * 100)}%`);
+  (ms.res || []).slice(0, 2).forEach((l, i) => (L += lv(`Resistance R${i + 1}`, fmt.px(l.price), `${l.touches} touches · ${vs(l.price)}`)));
+  (ms.sup || []).slice(0, 2).forEach((l, i) => (L += lv(`Support S${i + 1}`, fmt.px(l.price), `${l.touches} touches · ${vs(l.price)}`)));
   if (cyc) cyc.marks.filter((m) => m.fut).slice(0, 3).forEach((m) => {
     const k = futT.indexOf(m.time) + 1 + (fut.length - futT.length);
     L += lv(`Next cycle ${m.kind === "peak" ? "high" : "low"}`, niceD(isoD(m.time * 1000)), `est. ${fmt.px(fcAt(fc, k).med)} · in ${k} ${fc.calendar ? "days" : "bars"}`);
   });
   $("tvLevels").innerHTML = L;
+  $("tvPlan").innerHTML = plan ? planCard(r, plan) : "";
 }
 function setTVRange(bars) {
   TV.range = bars;
@@ -759,16 +929,19 @@ window.addEventListener("resize", () => { TV.charts.forEach((c) => c.applyOption
 
 /* ---------------- method page ---------------- */
 const METHOD = `
-<h2>How the price forecast works</h2>
-<p>Pick any date up to a year ahead. For every asset the screener estimates the <strong>most likely price</strong> on that date, a <strong>50% and 80% range</strong>, and the <strong>chance the price will be higher</strong> than today. It also projects the next <strong>cycle turning dates</strong> (likely swing highs and lows).</p>
-<table><tr><th>Part</th><th>How it is calculated</th></tr>
-<tr><td>Expected direction</td><td>30% of the last 6 months' average daily return. Raw past returns badly over-predict the future, so they are shrunk heavily toward zero.</td></tr>
-<tr><td>Range</td><td>Volatility blends recent (EWMA, λ = 0.94) and 1-year realised volatility. The range widens with the square root of time — a date 4× further away has a range about 2× wider.</td></tr>
-<tr><td>Cycle turning dates</td><td>The log price over the last ~256 bars is detrended, the strongest repeating cycle between 8 and 64 bars is found with a periodogram, and a sine wave fitted to the latest three cycles gives the next projected highs and lows. "Cycle strength" says how much of the recent swing the cycle explains; under 30% is weak.</td></tr>
-<tr><td>Cycle in the price estimate</td><td>The cycle is only added to the price estimate for an asset if, in testing on its own past data, adding it gave better direction calls and smaller errors than trend alone.</td></tr>
-<tr><td>Accuracy check</td><td>For each asset the model is re-run at about 40–50 past dates using only the data available then, and its 10-bar forecast is compared with what actually happened. "Past hit rate" is how often it got the direction right; the drawer also shows how often the price landed inside the 80% range (ideally close to 80%) and the average miss.</td></tr>
+<h2>How the forecast and signals work</h2>
+<p>The forecast is built the way a systematic (quant) desk would build one: a single model per asset group, trained on 5 years of daily data across every asset in the group, and judged only on data it has never seen.</p>
+<table><tr><th>Step</th><th>What happens</th></tr>
+<tr><td>1. Factors</td><td>Nine standardised factors per asset per day: distance from the 200-day EMA, 3-month and 12-minus-1-month momentum (volatility-adjusted), 1-week reversal, RSI, Bollinger z-score, ATR-trail direction, ADX/DMI direction, and 50/200 EMA alignment.</td></tr>
+<tr><td>2. Target</td><td>Forward return over 1 day, 1 week, 1 month, 3, 6 and 12 months, divided by the asset's expected volatility — so a quiet utility stock and a volatile coin are compared fairly.</td></tr>
+<tr><td>3. Model</td><td>Ridge regression pooled across all assets in the group (stocks + ETFs + indices together; crypto; forex) — tens of thousands of observations, so it does not over-fit one chart.</td></tr>
+<tr><td>4. Walk-forward test</td><td>The last 12 months are held out. The model is trained only on older data and scored on that year: <b>IC</b> (rank correlation of forecast vs outcome; above 0.05 is meaningful), <b>hit rate</b>, and how often outcomes fell inside the 50% and 80% ranges. If it shows no out-of-sample skill, its directional view is switched off.</td></tr>
+<tr><td>5. Ranges</td><td>Built from the model's real historical errors, not a textbook bell curve, so fat tails and skew are kept. That gives the base case (median), 50%, 80% and 90% ranges, and the chance of finishing above any price.</td></tr>
+<tr><td>6. Cycle</td><td>The dominant price cycle is projected for turning dates and only added to the price path when it beat the model on that asset's own history.</td></tr>
+<tr><td>7. Signal</td><td>Conviction (−100 to +100) = 50% forecast odds + 25% daily trend + 15% weekly trend + 10% swing structure. ≥ +55 STRONG BUY, ≥ +25 BUY, ≤ −25 SELL, ≤ −55 STRONG SELL. A buy is blocked when daily and weekly trends are both down, and vice-versa.</td></tr>
+<tr><td>8. Trade plan</td><td>Entry zone within ½ ATR of price (or the nearest support/resistance); stop beyond the ATR trail / 20-day swing / nearest level, kept between 1 and 3.5 ATR; targets = the forecast's base, good (75th pct) and stretch (90th pct) cases; R-multiples, probability of reaching each by the date, and position size for 1% account risk.</td></tr>
 </table>
-<p><strong>Reading it honestly:</strong> for most liquid stocks and indices the past hit rate will sit around 50–58%, because prices are close to random over days and weeks. The range is the more dependable output; the single "most likely" price is the centre of a wide distribution, not a target. Treat any hit rate under ~55% as no edge, and give more weight to assets showing 60%+ with a strong cycle. Use the <em>Reliable forecasts</em> preset to show only those.</p>
+<p><strong>Reading it honestly:</strong> even professional models are right on direction only ~52–58% of the time over days to weeks; the edge comes from sizing and stops, not certainty. Trust the ranges more than the single base-case number, and favour signals where the model's out-of-sample IC is positive and the asset's own hit rate is above 55%.</p>
 
 <h2>How the score works — and why these indicators</h2>
 <p>ELCARO lists 28 indicators plus proprietary scripts. Most of them measure the same thing in slightly different ways, and stacking correlated indicators makes a screener <em>look</em> more thorough without making it more accurate — it just over-weights one idea. This screener keeps one representative per factor family, favouring the families with the strongest published out-of-sample evidence, then combines them into a 0–100 composite ranked <strong>within each asset class</strong>.</p>

@@ -18,6 +18,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 import indicators as ind  # noqa: E402
 import universe as U  # noqa: E402
 import forecast as FC  # noqa: E402
+import model as MDL  # noqa: E402
+import structure as STR  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DATA = os.path.join(ROOT, "data")
@@ -28,7 +30,7 @@ HIST_BARS = 260
 
 
 # ---------------------------------------------------------------- download
-def download(tickers, period="2y"):
+def download(tickers, period="5y"):
     import yfinance as yf
 
     out = {}
@@ -398,10 +400,10 @@ def build(frames=None, fundamentals=None, sentiment=None):
     if sentiment is None:
         sentiment = crypto_sentiment()
 
-    result = {"generated": datetime.now(timezone.utc).isoformat(timespec="minutes"), "classes": {}}
+    result = {"generated": datetime.now(timezone.utc).isoformat(timespec="minutes"), "classes": {}, "model": {}}
+    GROUP = {"stocks": "equity", "etfs": "equity", "indices": "equity", "crypto": "crypto", "forex": "forex"}
+    rows_by_cls, xs = {}, {}
     for cls, syms in classes.items():
-        bench = frames.get(U.BENCH.get(cls)) if U.BENCH.get(cls) else None
-        bench_r63 = ret(bench["Close"], 63) if bench is not None else None
         rows = []
         for s in syms:
             df = frames.get(s)
@@ -409,6 +411,7 @@ def build(frames=None, fundamentals=None, sentiment=None):
                 continue
             try:
                 f, x = features(s, df)
+                f["ms"] = STR.structure(x, calendar=(cls == "crypto"))
             except Exception as e:
                 print("features failed", s, e)
                 continue
@@ -424,13 +427,29 @@ def build(frames=None, fundamentals=None, sentiment=None):
             if cls == "stocks":
                 f.update({"fscore": meta.get("fscore"), "altz": meta.get("altz"),
                           "sector": meta.get("sector"), "mcap": meta.get("mcap")})
-            try:
-                f["fc"] = FC.forecast(df["Close"], calendar=(cls == "crypto"))
-            except Exception as e:
-                print("forecast failed", s, e)
-                f["fc"] = None
             rows.append(f)
+            xs.setdefault(GROUP[cls], {})[s] = x
             write_history(s, x)
+        rows_by_cls[cls] = rows
+    msym = {}
+    for g, xd in xs.items():
+        try:
+            per, stats = MDL.fit_group({s: MDL.features(x) for s, x in xd.items()})
+            msym.update(per)
+            result["model"][g] = stats
+            print(g, {h: (v["ic_oos"], v["hit_oos"], v["k"]) for h, v in stats["h"].items()})
+        except Exception as e:
+            print("model failed", g, e)
+    for cls, rows in rows_by_cls.items():
+        bench = frames.get(U.BENCH.get(cls)) if U.BENCH.get(cls) else None
+        bench_r63 = ret(bench["Close"], 63) if bench is not None else None
+        for f in rows:
+            try:
+                f["fc"] = FC.forecast(frames[f["sym"]]["Close"], calendar=(cls == "crypto"),
+                                      msym=msym.get(f["sym"], {}), grp=GROUP[cls])
+            except Exception as e:
+                print("forecast failed", f["sym"], e)
+                f["fc"] = None
         score_class(rows, cls, bench_r63)
         rows.sort(key=lambda r: -(r["score"] or 0))
         result["classes"][cls] = [{k: clean(v) for k, v in r.items()} for r in rows]
