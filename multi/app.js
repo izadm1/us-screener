@@ -198,6 +198,7 @@ function setDate(iso) {
   $("fdate").value = iso;
   render();
   if (!$("drawer").hidden && S.openSym) openDetail(S.openSym, true);
+  if (S.view === "tech" && TV.sym) drawTV(TV.sym);
 }
 function initForecastControls() {
   const today = new Date();
@@ -208,7 +209,7 @@ function initForecastControls() {
   $("fdate").value = S.fdate;
   $("fdate").addEventListener("change", () => $("fdate").value && setDate($("fdate").value));
   $("quick").onclick = (e) => { const d = e.target.dataset.d; if (d) setDate(isoD(parseD(todayIso) + d * DAY)); };
-  $("view").onclick = (e) => { const v = e.target.dataset.v; if (!v) return; setView(v); if (v === "tech" && ["fchg", "fmed", "pup", "acc", "turn"].includes(S.sort.key)) S.sort = { key: "score", dir: -1 }; render(); };
+  $("view").onclick = (e) => { const v = e.target.dataset.v; if (!v) return; setView(v); if (v === "tech" && ["fchg", "fmed", "pup", "acc", "turn"].includes(S.sort.key)) S.sort = { key: "score", dir: -1 }; render(); syncTV(); };
 }
 function resetFilters() {
   $("q").value = ""; $("minScore").value = 0; $("rsiMin").value = 0; $("rsiMax").value = 100;
@@ -255,6 +256,7 @@ function render() {
   $("tbl").querySelector("thead").innerHTML = "<tr>" + cols.map((c) => `<th data-k="${c.k}" class="${S.sort.key === c.k ? "sorted" : ""}">${c.t}${S.sort.key === c.k ? (S.sort.dir < 0 ? " ↓" : " ↑") : ""}</th>`).join("") + "</tr>";
   const list = rows();
   $("tbl").querySelector("tbody").innerHTML = list.map((r) => `<tr data-s="${r.sym}">` + cols.map((c) => `<td class="${c.cl || ""}">${c.f(r)}</td>`).join("") + "</tr>").join("");
+  if (S.view === "tech" && TV.sym) document.querySelectorAll("#tbl tbody tr").forEach((tr) => tr.classList.toggle("sel", tr.dataset.s === TV.sym));
   $("count").textContent = `${list.length} of ${(S.data.classes[S.cls] || []).length}`;
 }
 $("tbl").addEventListener("click", (e) => {
@@ -266,7 +268,9 @@ $("tbl").addEventListener("click", (e) => {
     render(); return;
   }
   const tr = e.target.closest("tr[data-s]");
-  if (tr) openDetail(tr.dataset.s);
+  if (!tr) return;
+  if (S.view === "tech") { drawTV(tr.dataset.s); $("tv").scrollIntoView({ behavior: "smooth", block: "start" }); }
+  else openDetail(tr.dataset.s);
 });
 
 /* ---------------- tabs ---------------- */
@@ -277,8 +281,8 @@ $("tabs").onclick = (e) => {
   const m = S.cls === "method";
   $("screen").hidden = m; $("method").hidden = !m;
   if (m) { $("method").innerHTML = METHOD; return; }
-  if (S.cls === "indices" || S.cls === "etfs") S.sort = { key: "score", dir: -1 };
   render();
+  syncTV();
 };
 
 /* ---------------- detail drawer ---------------- */
@@ -398,10 +402,194 @@ async function drawChart(sym) {
   ch.timeScale().subscribeVisibleLogicalRangeChange((r) => r && rc.timeScale().setVisibleLogicalRange(r));
   S.chart = ch; S.rsiChart = rc;
 }
+/* ---------------- technical view: full candlestick + cycle panel ---------------- */
+const TV = { sym: null, range: 126, charts: [], n: 0, fut: 0 };
+function chartOpts(el, height) {
+  return { width: el.clientWidth, height, layout: { background: { color: "#121720" }, textColor: "#8a93a3", fontFamily: "IBM Plex Mono" },
+    grid: { vertLines: { color: "#1a212c" }, horzLines: { color: "#1a212c" } }, rightPriceScale: { borderColor: "#232b38", minimumWidth: 80 },
+    timeScale: { borderColor: "#232b38", rightOffset: 4 }, crosshair: { mode: 0 } };
+}
+const ws = (times) => times.map((t) => ({ time: t }));
+function cycleSeries(h, fc, futTimes) {
+  // fitted sine (from forecast.py params) and the detrended price it was fitted to, both in %
+  const cy = fc && fc.cycle;
+  if (!cy) return null;
+  const P = cy.period, n = h.c.length, m = Math.min(n, 3 * P), w = 2 * Math.PI / P;
+  const y = h.c.slice(n - m).map(Math.log), x = y.map((_, i) => i);
+  const xm = (m - 1) / 2, ym = y.reduce((a, b) => a + b, 0) / m;
+  let sxy = 0, sxx = 0; for (let i = 0; i < m; i++) { sxy += (x[i] - xm) * (y[i] - ym); sxx += (x[i] - xm) ** 2; }
+  const b = sxy / sxx, a = ym - b * xm;
+  const actual = [], fit = [], marks = [];
+  const start = Math.max(0, n - Math.max(m, 260));
+  for (let i = start; i < n; i++) {
+    const k = i - (n - 1);
+    const s = cy.amp * Math.sin(cy.phase + w * k) * 100;
+    fit.push({ time: h.t[i], value: s });
+    if (i >= n - m) actual.push({ time: h.t[i], value: (y[i - (n - m)] - (a + b * (i - (n - m)))) * 100 });
+  }
+  futTimes.forEach((t, j) => fit.push({ time: t, value: cy.amp * Math.sin(cy.phase + w * (j + 1)) * 100 }));
+  // turning points of the fitted wave (past and future)
+  const allT = h.t.slice(start).concat(futTimes);
+  for (let i = 1; i < fit.length - 1; i++) {
+    const p = fit[i - 1].value, c = fit[i].value, nx = fit[i + 1].value;
+    if (c > p && c >= nx) marks.push({ time: allT[i], kind: "peak", fut: i >= n - start });
+    if (c < p && c <= nx) marks.push({ time: allT[i], kind: "trough", fut: i >= n - start });
+  }
+  return { actual, fit, marks };
+}
+async function drawTV(sym) {
+  const r = (S.data.classes[S.cls] || []).find((x) => x.sym === sym);
+  if (!r) return;
+  TV.sym = sym;
+  document.querySelectorAll("#tbl tbody tr").forEach((tr) => tr.classList.toggle("sel", tr.dataset.s === sym));
+  $("tvSym").textContent = sym.replace(/\d{3,}-USD$/, "-USD");
+  $("tvName").textContent = r.name || "";
+  let h;
+  try { h = await (await fetch(`data/history/${safe(sym)}.json`)).json(); } catch (e) { $("tvMain").textContent = "No chart data"; return; }
+  TV.charts.forEach((c) => c.remove()); TV.charts = [];
+  const fc = r.fc, n = h.t.length; TV.n = n;
+  const P = fc && fc.cycle ? fc.cycle.period : 30;
+  const H = fc ? Math.min(260, Math.max(63, 2 * P, barsBetween(fc.asof, S.fdate, fc.calendar))) : 0;
+  const fut = []; for (let k = 1; k <= H; k++) fut.push(addBars(fc.asof, k, fc.calendar) / 1000);
+  const futT = fut.filter((t) => t > h.t[n - 1]); TV.fut = futT.length;
+  const allTimes = h.t.concat(futT);
+
+  // main chart
+  const el = $("tvMain"); el.innerHTML = "";
+  const ch = LightweightCharts.createChart(el, chartOpts(el, 460));
+  const cs = ch.addCandlestickSeries({ upColor: "#22c38e", downColor: "#f0565b", borderVisible: false, wickUpColor: "#22c38e", wickDownColor: "#f0565b" });
+  cs.setData(h.t.map((t, i) => ({ time: t, open: h.o[i], high: h.h[i], low: h.l[i], close: h.c[i] })));
+  const vol = ch.addHistogramSeries({ priceScaleId: "vol", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false });
+  ch.priceScale("vol").applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
+  ch.priceScale("right").applyOptions({ scaleMargins: { top: 0.06, bottom: 0.2 } });
+  vol.setData(h.t.map((t, i) => ({ time: t, value: h.v[i] || 0, color: h.c[i] >= h.o[i] ? "rgba(34,195,142,.35)" : "rgba(240,86,91,.35)" })));
+  const line = (vals, color, w = 1, style = 0, times = h.t) => { const s = ch.addLineSeries({ color, lineWidth: w, lineStyle: style, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }); s.setData(times.map((t, i) => vals[i] == null ? { time: t } : { time: t, value: vals[i] })); return s; };
+  line(h.e20, "#f2b33d"); line(h.e50, "#5b8cff"); line(h.e200, "#9b7bff", 2);
+  // Bollinger from closes
+  const bu = [], bl = [];
+  for (let i = 0; i < n; i++) { if (i < 19) { bu.push(null); bl.push(null); continue; } const w = h.c.slice(i - 19, i + 1), m = w.reduce((a, b) => a + b, 0) / 20, sd = Math.sqrt(w.reduce((a, b) => a + (b - m) ** 2, 0) / 20); bu.push(m + 2 * sd); bl.push(m - 2 * sd); }
+  line(bu, "rgba(138,147,163,.45)", 1, 1); line(bl, "rgba(138,147,163,.45)", 1, 1);
+  const st = ch.addLineSeries({ lineWidth: 2, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+  st.setData(h.t.map((t, i) => h.st[i] == null ? { time: t } : { time: t, value: h.st[i], color: h.sd[i] === 1 ? "#22c38e" : "#f0565b" }));
+  // key price lines
+  const last = h.c[n - 1], hi52 = Math.max(...h.h.slice(-252)), lo52 = Math.min(...h.l.slice(-252));
+  const pl = (price, color, title, style = 2) => cs.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title });
+  pl(hi52, "#8a93a3", "52W high"); pl(lo52, "#8a93a3", "52W low");
+  if (r.st_stop) pl(r.st_stop, r.st_dir === 1 ? "#22c38e" : "#f0565b", "ATR stop");
+  // forecast cone + cycle turn markers
+  let f = null, cyc = null;
+  if (fc) {
+    f = fcFor(r);
+    const med = [], hi = [], lo = [];
+    futT.forEach((t, j) => { const x = fcAt(fc, j + 1 + (fut.length - futT.length)); med.push(x.med); hi.push(x.hi80); lo.push(x.lo80); });
+    const ft = [h.t[n - 1]].concat(futT);
+    const ms = line([fc.p0].concat(med), "#e6e9ef", 2, 0, ft); line([fc.p0].concat(hi), "#5b8cff", 1, 2, ft); line([fc.p0].concat(lo), "#5b8cff", 1, 2, ft);
+    if (f && f.h > 0) pl(f.med, "#f2b33d", `Target ${niceD(S.fdate)}`, 0);
+    cyc = cycleSeries(h, fc, futT);
+    if (cyc) {
+      const weak = fc.cycle.strength < 0.3;
+      const pastMarks = cyc.marks.filter((m) => !m.fut).map((m) => ({ time: m.time, position: m.kind === "peak" ? "aboveBar" : "belowBar", color: m.kind === "peak" ? "rgba(240,86,91,.7)" : "rgba(34,195,142,.7)", shape: "circle", size: 0.6 }));
+      cs.setMarkers(pastMarks);
+      const futMarks = cyc.marks.filter((m) => m.fut).map((m) => {
+        const k = futT.indexOf(m.time) + 1 + (fut.length - futT.length);
+        const est = fcAt(fc, k).med;
+        return { time: m.time, position: m.kind === "peak" ? "aboveBar" : "belowBar", color: m.kind === "peak" ? "#f0565b" : "#22c38e", shape: m.kind === "peak" ? "arrowDown" : "arrowUp", text: `${m.kind === "peak" ? "High" : "Low"} ~${fmt.px(est)}` };
+      });
+      ms.setMarkers(futMarks);
+    }
+  } else line([], "#000", 1, 0, futT);
+  TV.charts.push(ch);
+
+  // cycle pane
+  const ec = $("tvCyc"); ec.innerHTML = "";
+  const cc = LightweightCharts.createChart(ec, chartOpts(ec, 150));
+  const pad = cc.addLineSeries({ visible: false }); pad.setData(ws(allTimes));
+  if (cyc) {
+    const M = 1.2 * Math.max(0.5, ...cyc.actual.map((d) => Math.abs(d.value)), ...cyc.fit.map((d) => Math.abs(d.value)));
+    const auto = () => ({ priceRange: { minValue: -M, maxValue: M } });
+    const pf = { type: "custom", formatter: (v) => v.toFixed(1) + "%" };
+    const ca = cc.addLineSeries({ color: "#8a93a3", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, title: "price vs trend", autoscaleInfoProvider: auto, priceFormat: pf }); ca.setData(cyc.actual);
+    const cf = cc.addLineSeries({ color: "#f2b33d", lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: "cycle", autoscaleInfoProvider: auto, priceFormat: pf }); cf.setData(cyc.fit);
+    cf.createPriceLine({ price: 0, color: "#3a4352", lineStyle: 2, lineWidth: 1, axisLabelVisible: false });
+    cf.setMarkers(cyc.marks.filter((m) => m.fut).map((m) => ({ time: m.time, position: m.kind === "peak" ? "aboveBar" : "belowBar", color: m.kind === "peak" ? "#f0565b" : "#22c38e", shape: m.kind === "peak" ? "arrowDown" : "arrowUp", text: niceD(isoD(m.time * 1000)) })));
+    const s = fc.cycle.strength;
+    $("tvCycInfo").innerHTML = `period ≈ ${fc.cycle.period} ${fc.calendar ? "days" : "trading days"}, swing ±${(fc.cycle.amp * 100).toFixed(1)}%, strength <span class="${s >= 0.5 ? "up" : s < 0.3 ? "warn" : ""}">${(s * 100).toFixed(0)}%${s < 0.3 ? " (weak — rough guide only)" : s >= 0.5 ? " (clear)" : ""}</span>${fc.use_cycle ? " · used in the price forecast" : " · not used in the price forecast"}`;
+  } else $("tvCycInfo").textContent = "not enough history";
+  TV.charts.push(cc);
+
+  // RSI pane
+  const er = $("tvRsi"); er.innerHTML = "";
+  const rc = LightweightCharts.createChart(er, chartOpts(er, 100));
+  const pad2 = rc.addLineSeries({ visible: false }); pad2.setData(ws(allTimes));
+  const rs = rc.addLineSeries({ color: "#9b7bff", lineWidth: 1, priceLineVisible: false });
+  rs.setData(h.t.map((t, i) => h.rsi[i] == null ? { time: t } : { time: t, value: h.rsi[i] }));
+  [70, 30].forEach((p) => rs.createPriceLine({ price: p, color: "#3a4352", lineStyle: 2, lineWidth: 1, axisLabelVisible: false }));
+  TV.charts.push(rc);
+
+  // sync panes
+  let syncing = false;
+  TV.charts.forEach((c) => c.timeScale().subscribeVisibleLogicalRangeChange((rg) => {
+    if (syncing || !rg) return; syncing = true;
+    TV.charts.forEach((o) => o !== c && o.timeScale().setVisibleLogicalRange(rg)); syncing = false;
+  }));
+  setTVRange(TV.range);
+
+  // OHLC readout
+  const readout = (i) => {
+    if (i == null || i < 0 || i >= n) i = n - 1;
+    const chg = i > 0 ? h.c[i] / h.c[i - 1] - 1 : 0;
+    $("tvOhlc").innerHTML = `<span>${niceD(isoD(h.t[i] * 1000))}</span><span>O <b>${fmt.px(h.o[i])}</b></span><span>H <b>${fmt.px(h.h[i])}</b></span><span>L <b>${fmt.px(h.l[i])}</b></span><span>C <b>${fmt.px(h.c[i])}</b></span><span class="${cls(chg)}">${fmt.pct(chg, 2)}</span><span>Vol <b>${h.v[i] ? Number(h.v[i]).toLocaleString() : "–"}</b></span><span>RSI <b>${fmt.n(h.rsi[i], 0)}</b></span>`;
+  };
+  readout(n - 1);
+  ch.subscribeCrosshairMove((p) => {
+    if (!p || p.time == null) return readout(n - 1);
+    const i = h.t.indexOf(p.time);
+    if (i >= 0) return readout(i);
+    if (fc) { const k = futT.indexOf(p.time) + 1 + (fut.length - futT.length); const x = fcAt(fc, k); $("tvOhlc").innerHTML = `<span>${niceD(isoD(p.time * 1000))} (forecast)</span><span>Est. <b>${fmt.px(x.med)}</b></span><span>80% <b>${fmt.px(x.lo80)} – ${fmt.px(x.hi80)}</b></span><span>P(higher) <b>${(x.pup * 100).toFixed(0)}%</b></span>`; }
+  });
+
+  $("tvLegend").innerHTML = `<span style="--c:#f2b33d">EMA 20</span><span style="--c:#5b8cff">EMA 50</span><span style="--c:#9b7bff">EMA 200</span><span style="--c:#8a93a3">Bollinger 20,2</span><span style="--c:#22c38e">ATR trail</span><span style="--c:#e6e9ef">Forecast</span><span style="--c:#5b8cff">80% range</span><span style="--c:#f2b33d">Cycle wave</span>`;
+
+  // key levels
+  const lv = (l, v, s = "") => `<div class="lv"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
+  const vs = (p) => `${fmt.pct(p / last - 1)} from price`;
+  let L = lv("Last price", fmt.px(last), `${r.date} · ${fmt.pct(r.chg1d, 2)} 1D`)
+    + lv("Day range", `${fmt.px(h.l[n - 1])} – ${fmt.px(h.h[n - 1])}`, `open ${fmt.px(h.o[n - 1])}`)
+    + lv("52-week high", fmt.px(hi52), vs(hi52)) + lv("52-week low", fmt.px(lo52), vs(lo52))
+    + lv("EMA 20 / 50", `${fmt.px(h.e20[n - 1])} / ${fmt.px(h.e50[n - 1])}`, "short / medium trend")
+    + lv("EMA 200", fmt.px(h.e200[n - 1]), h.e200[n - 1] ? vs(h.e200[n - 1]) : "")
+    + lv("Bollinger band", `${fmt.px(bl[n - 1])} – ${fmt.px(bu[n - 1])}`, `σ-zone ${fmt.n(r.z20, 2)}`)
+    + lv("ATR trail stop", fmt.px(r.st_stop), r.st_stop ? `${r.st_dir === 1 ? "long" : "short"} · ${vs(r.st_stop)}` : "");
+  if (f) L += lv(`Forecast ${niceD(S.fdate)}`, fmt.px(f.med), `80%: ${fmt.px(f.lo80)} – ${fmt.px(f.hi80)}`);
+  if (cyc) cyc.marks.filter((m) => m.fut).slice(0, 3).forEach((m) => {
+    const k = futT.indexOf(m.time) + 1 + (fut.length - futT.length);
+    L += lv(`Next cycle ${m.kind === "peak" ? "high" : "low"}`, niceD(isoD(m.time * 1000)), `est. ${fmt.px(fcAt(fc, k).med)} · in ${k} ${fc.calendar ? "days" : "bars"}`);
+  });
+  $("tvLevels").innerHTML = L;
+}
+function setTVRange(bars) {
+  TV.range = bars;
+  [...$("tvRange").children].forEach((b) => b.classList.toggle("on", +b.dataset.r === bars));
+  const from = Math.max(0, TV.n - bars), to = TV.n - 1 + Math.min(TV.fut, Math.max(20, Math.round(bars / 3)));
+  TV.charts.forEach((c) => c.timeScale().setVisibleLogicalRange({ from, to }));
+}
+$("tvRange").onclick = (e) => { const b = e.target.dataset.r; if (b) setTVRange(+b); };
+$("tvDetails").onclick = () => TV.sym && openDetail(TV.sym);
+function syncTV() {
+  const on = S.view === "tech" && S.cls !== "method";
+  $("tv").hidden = !on;
+  if (!on || !S.data) return;
+  const list = S.data.classes[S.cls] || [];
+  const ok = list.some((x) => x.sym === TV.sym);
+  const first = document.querySelector("#tbl tbody tr[data-s]");
+  const sym = ok ? TV.sym : first ? first.dataset.s : null;
+  if (sym) drawTV(sym);
+}
+
 $("closeDrawer").onclick = () => ($("drawer").hidden = true);
 $("drawer").addEventListener("click", (e) => { if (e.target.id === "drawer") $("drawer").hidden = true; });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("drawer").hidden = true; });
-window.addEventListener("resize", () => { if (S.chart) S.chart.applyOptions({ width: $("chart").clientWidth }); if (S.rsiChart) S.rsiChart.applyOptions({ width: $("rsiChart").clientWidth }); });
+window.addEventListener("resize", () => { TV.charts.forEach((c) => c.applyOptions({ width: c.chartElement().parentElement.clientWidth })); if (S.chart) S.chart.applyOptions({ width: $("chart").clientWidth }); if (S.rsiChart) S.rsiChart.applyOptions({ width: $("rsiChart").clientWidth }); });
 
 /* ---------------- method page ---------------- */
 const METHOD = `

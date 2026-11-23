@@ -96,3 +96,20 @@ h3{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--mute)
 .fctable tr.sel td{background:rgba(91,140,255,.08)}
 .note{font-size:12px;color:var(--mute);margin:6px 0}
 .turns{display:flex;gap:6px;flex-wrap:wrap}
+.tv{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+.tv[hidden]{display:none}
+.tvhead{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.tvsym{font:700 20px var(--sans)} .tvname{color:var(--mute)}
+.ohlc{font:13px var(--mono);color:var(--mute);display:flex;gap:12px;flex-wrap:wrap}
+.ohlc b{color:var(--text);font-weight:500}
+.tvctl{display:flex;gap:8px;align-items:center}
+.quick button.on{color:var(--text);border-color:var(--acc)}
+.tvbtn{background:var(--acc);border:0;border-radius:8px;padding:6px 12px;color:#fff;font-weight:600;font-size:13px}
+.tvmain{height:460px}
+.panelabel{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--mute);margin-top:8px}
+.panelabel span{text-transform:none;letter-spacing:0}
+.levels{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin-top:12px}
+.lv{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+.lv .l{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.4px}
+.lv .v{font:600 15px var(--mono)} .lv .s{font:12px var(--mono);color:var(--mute)}
+tbody tr.sel{background:rgba(91,140,255,.10)}
