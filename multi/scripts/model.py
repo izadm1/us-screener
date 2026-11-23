@@ -154,7 +154,7 @@ def fit_group(feat_by_sym: dict, center: bool = False):
             "hit_oos": None if np.isnan(hit) else round(hit, 4), "base_up_oos": round(base_up, 4),
             "hit_rel_oos": round(hit_rel, 4), "t_ic": round(float(t_ic), 2), "n_eff": round(float(n_eff), 1), "widen": round(widen, 3),
             "cov80_oos": round(cov80, 4), "cov50_oos": round(cov50, 4),
-            "q": [round(v, 4) for v in grid], "coef": dict(zip(["const"] + FEATS, [round(float(v), 4) for v in b])),
+            "off": round(off, 6), "q": [round(v, 4) for v in grid], "coef": dict(zip(["const"] + FEATS, [round(float(v), 4) for v in b])),
         }
         # live prediction per symbol (last bar with complete features)
         for s, f in feat_by_sym.items():

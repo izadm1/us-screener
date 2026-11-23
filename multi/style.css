@@ -181,3 +181,12 @@ tbody tr.sel{background:rgba(91,140,255,.10)}
 .ex .v{font:600 15px var(--mono)} .ex .s{font:11px var(--mono);color:var(--mute)}
 .ex div:nth-child(3){font:12px var(--mono)}
 .sigchip.sb2{background:var(--up);color:#06281c} .sigchip.ss2{background:var(--down);color:#2a0709} .sigchip.sn{background:var(--panel2);color:var(--mute)}
+.live{margin:2px 0 0;font:11px var(--mono);color:var(--mute);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.live .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#555;margin-right:2px}
+.live .dot.on{background:var(--up);box-shadow:0 0 0 3px rgba(34,195,142,.2);animation:pulse 2s infinite}
+@keyframes pulse{50%{box-shadow:0 0 0 6px rgba(34,195,142,0)}}
+.live .sep{opacity:.4}
+.live a{color:var(--acc)}
+.keybox{position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:80;background:var(--panel);border:1px solid var(--acc);border-radius:12px;padding:14px;width:min(420px,92vw);box-shadow:0 10px 40px rgba(0,0,0,.6)}
+.keybox input{width:100%;margin:6px 0;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px}
+.keybox button{margin-right:6px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 12px}

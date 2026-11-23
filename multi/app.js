@@ -704,7 +704,7 @@ async function drawChart(sym) {
   const el = $("chart"), el2 = $("rsiChart");
   el.innerHTML = ""; el2.innerHTML = "";
   let h;
-  try { h = await (await fetch(`data/history/${safe(sym)}.json`)).json(); } catch (e) { el.textContent = "No chart data"; return; }
+  try { h = await getHist(sym); } catch (e) { el.textContent = "No chart data"; return; }
   const opts = (height) => ({ height, layout: { background: { color: "#0b0e13" }, textColor: "#8a93a3", fontFamily: "IBM Plex Mono" }, grid: { vertLines: { color: "#161c26" }, horzLines: { color: "#161c26" } }, rightPriceScale: { borderColor: "#232b38" }, timeScale: { borderColor: "#232b38" }, crosshair: { mode: 0 } });
   const ch = LightweightCharts.createChart(el, { ...opts(340), width: el.clientWidth });
   const cs = ch.addCandlestickSeries({ upColor: "#22c38e", downColor: "#f0565b", borderVisible: false, wickUpColor: "#22c38e", wickDownColor: "#f0565b" });
@@ -786,7 +786,7 @@ async function drawTV(sym) {
   $("tvSym").textContent = disp(r);
   $("tvName").textContent = r.name || "";
   let h;
-  try { h = await (await fetch(`data/history/${safe(sym)}.json`)).json(); } catch (e) { $("tvMain").textContent = "No chart data"; return; }
+  try { h = await getHist(sym); } catch (e) { $("tvMain").textContent = "No chart data"; return; }
   TV.charts.forEach((c) => c.remove()); TV.charts = [];
   const fc = r.fc, n = h.t.length; TV.n = n;
   const P = fc && fc.cycle ? fc.cycle.period : 30;

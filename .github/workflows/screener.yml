@@ -41,7 +41,7 @@ jobs:
         run: |
           python multi/scripts/build_data.py
           mkdir -p site/multi
-          cp -r multi/index.html multi/app.js multi/style.css multi/vendor multi/data site/multi/
+          cp -r multi/index.html multi/app.js multi/live.js multi/style.css multi/vendor multi/data site/multi/
           touch site/.nojekyll
           sed -i "s/__V__/${GITHUB_RUN_ID}/g" site/multi/index.html
       - name: Save plan and results history
