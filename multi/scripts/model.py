@@ -111,25 +111,40 @@ def fit_group(feat_by_sym: dict):
         ic_in = _spearman(p_tr, ytr)
         ic_oos = _spearman(p_te, te["y"].values)
         k = 0.0 if (np.isnan(ic_in) or np.isnan(ic_oos) or ic_in <= 0) else float(np.clip(ic_oos / ic_in, 0, 1))
+        # significance: overlapping h-bar outcomes leave ~OOS_DAYS/h independent periods per asset, and
+        # assets are correlated, so effective sample ~ (OOS_DAYS/h) * sqrt(n_assets). Require t >= 2 for full weight.
+        n_sym = te["sym"].nunique()
+        n_eff = max(1.0, (OOS_DAYS / h) * np.sqrt(max(n_sym, 1)))
+        t_ic = 0.0 if np.isnan(ic_oos) else ic_oos * np.sqrt(n_eff)
+        k = float(k * np.clip(t_ic / 2.0, 0, 1))
         # demeaned direction skill: does the model's tilt beat the unconditional drift?
         nz = np.abs(p_te) > 1e-9
         hit = float(np.mean(np.sign(p_te[nz]) == np.sign(te["y"].values[nz]))) if nz.any() else np.nan
         base_up = float(np.mean(te["y"].values > 0))
+        # relative skill: did assets/dates the model ranked above its median beat the median outcome?
+        yv = te["y"].values
+        hit_rel = float(np.mean(np.sign(p_te - np.median(p_te)) == np.sign(yv - np.median(yv))))
         # residual distribution (train) -> OOS coverage check of the ranges
         res_tr = ytr - k * p_tr
         q_tr = np.percentile(res_tr, [10, 25, 75, 90])
         r_te = te["y"].values - k * p_te
         cov80 = float(np.mean((r_te >= q_tr[0]) & (r_te <= q_tr[3])))
         cov50 = float(np.mean((r_te >= q_tr[1]) & (r_te <= q_tr[2])))
+        # widen ranges if the held-out year was more volatile than training (never narrow them)
+        med_tr = np.median(res_tr)
+        widen = float(np.clip(np.percentile(np.abs(r_te - med_tr), 80) / max(np.percentile(np.abs(res_tr - med_tr), 80), 1e-9), 1.0, 1.5))
         # final model on everything; residual grid from all data
         X, y = D[FEATS].values, D["y"].values
         b = _ridge(X, y)
         res = y - k * _pred(b, X)
-        grid = np.percentile(res, GRID_P).tolist()
+        g = np.percentile(res, GRID_P)
+        g50 = g[GRID_P.index(50)]
+        grid = (g50 + (g - g50) * widen).tolist()
         stats[str(h)] = {
             "n": int(len(D)), "n_oos": int(len(te)), "ic_in": None if np.isnan(ic_in) else round(ic_in, 4),
             "ic_oos": None if np.isnan(ic_oos) else round(ic_oos, 4), "k": round(k, 3),
             "hit_oos": None if np.isnan(hit) else round(hit, 4), "base_up_oos": round(base_up, 4),
+            "hit_rel_oos": round(hit_rel, 4), "t_ic": round(float(t_ic), 2), "n_eff": round(float(n_eff), 1), "widen": round(widen, 3),
             "cov80_oos": round(cov80, 4), "cov50_oos": round(cov50, 4),
             "q": [round(v, 4) for v in grid], "coef": dict(zip(["const"] + FEATS, [round(float(v), 4) for v in b])),
         }

@@ -84,6 +84,15 @@ function modelStats(fc, h) { // nearest validated horizon for this asset group
 const fcFor = (r) => r.fc ? fcAt(r.fc, barsBetween(r.fc.asof, S.fdate, r.fc.calendar)) : null;
 /* ---------------- trade plan: signal, entry, stop, targets ---------------- */
 const SIG_COL = { "STRONG BUY": "sb2", BUY: "sb", NEUTRAL: "sn", SELL: "ss", "STRONG SELL": "ss2" };
+const PBAR = {};
+function groupPup(cls, h) {
+  const key = cls + "|" + h + "|" + (S.data && S.data.generated);
+  if (PBAR[key] == null) {
+    const list = (S.data.classes[cls] || []).filter((x) => x.fc);
+    PBAR[key] = list.length ? list.reduce((s, x) => s + fcAt(x.fc, h).pup, 0) / list.length : 0.5;
+  }
+  return PBAR[key];
+}
 function tradePlan(r, h) {
   const fc = r.fc;
   if (!fc || !r.price) return null;
@@ -94,13 +103,16 @@ function tradePlan(r, h) {
   const tDn = r.above200 == null ? r.st_dir === -1 : r.above200 === false && r.st_dir === -1;
   const wk = ms.wk_trend || 0;
   const struct = /HH\/HL/.test(ms.structure || "") ? 1 : /LH\/LL/.test(ms.structure || "") ? -1 : 0;
-  const prob = Math.max(-1, Math.min(1, (f.pup - 0.5) / 0.15));
+  // odds term: 60% relative to the asset's own group today (pure skill, market-neutral), 40% absolute
+  const pbar = groupPup(r._cls, h);
+  const cl1 = (v) => Math.max(-1, Math.min(1, v));
+  const prob = 0.6 * cl1((f.pup - pbar) / 0.08) + 0.4 * cl1((f.pup - 0.5) / 0.15);
   const conv = Math.round(100 * (0.5 * prob + 0.25 * (tUp ? 1 : tDn ? -1 : 0) + 0.15 * wk + 0.10 * struct));
   let sig = conv >= 55 ? "STRONG BUY" : conv >= 25 ? "BUY" : conv <= -55 ? "STRONG SELL" : conv <= -25 ? "SELL" : "NEUTRAL";
   if (sig.includes("BUY") && tDn && wk === -1) sig = "NEUTRAL";      // never buy against daily + weekly downtrend
   if (sig.includes("SELL") && tUp && wk === 1) sig = "NEUTRAL";      // never sell against daily + weekly uptrend
   const why = [];
-  why.push(`${Math.round(f.pup * 100)}% chance higher by target date`);
+  why.push(`${Math.round(f.pup * 100)}% chance higher by target date (group average ${Math.round(pbar * 100)}%)`);
   why.push(tUp ? "Daily trend up (above 200-day, ATR trail long)" : tDn ? "Daily trend down (below 200-day, ATR trail short)" : "Daily trend mixed");
   why.push(wk === 1 ? "Weekly trend up" : wk === -1 ? "Weekly trend down" : "Weekly trend flat/unclear");
   if (ms.structure) why.push(`Structure: ${ms.structure}${ms.bos ? ` · ${ms.bos} break of structure` : ""}`);
@@ -616,6 +628,7 @@ function planCard(r, plan) {
       <div><div class="l">Chance of closing past stop</div><div class="v">${Math.round(plan.pStop * 100)}%</div><div class="s">by ${niceD(S.fdate)}</div></div>
     </div>`;
     if (plan.obstacle) h += `<p class="note">⚠ ${plan.dir === 1 ? "Resistance" : "Support"} at ${px(plan.obstacle)} sits before Target 1 — expect a reaction there.</p>`;
+    if (plan.targets[0].R < 1) h += `<p class="note">⚠ Base-case target is only ${plan.targets[0].R.toFixed(1)}R — better to enter near the ${plan.dir === 1 ? "bottom" : "top"} of the zone, or use a later target date.</p>`;
   } else {
     h += `<p class="note" style="margin:8px 0 0">No trade: the odds and the trend don't line up. Watch for a close above <b>${px(plan.waitLong)}</b> (bullish trigger) or below <b>${px(plan.waitShort)}</b> (bearish trigger).</p>`;
   }
@@ -647,7 +660,9 @@ function forecastSection(r) {
     const edge = ms.k > 0 && ms.ic_oos > 0;
     h += `<h3>How reliable is this forecast?</h3><div class="grid2">
       <div class="kv"><span>Out-of-sample IC (${ms.h}-bar, last year)</span><span class="${ms.ic_oos >= 0.05 ? "up" : ms.ic_oos > 0 ? "warn" : "down"}">${ms.ic_oos == null ? "–" : ms.ic_oos.toFixed(3)}</span></div>
-      <div class="kv"><span>Direction hit rate (all ${fc.grp} assets)</span><span>${ms.hit_oos == null ? "–" : Math.round(ms.hit_oos * 100) + "%"} <span class="mute">vs ${Math.round(ms.base_up_oos * 100)}% up-days</span></span></div>
+      <div class="kv"><span>Direction hit rate (all ${fc.grp} assets)</span><span>${ms.hit_oos == null ? "–" : Math.round(ms.hit_oos * 100) + "%"} <span class="mute">vs ${Math.round(ms.base_up_oos * 100)}% up-periods</span></span></div>
+      <div class="kv"><span>Picked the better performers</span><span class="${(ms.hit_rel_oos || 0) >= 0.53 ? "up" : (ms.hit_rel_oos || 0) < 0.5 ? "down" : "warn"}">${ms.hit_rel_oos != null ? Math.round(ms.hit_rel_oos * 100) + "%" : "–"} <span class="mute">(50% = no skill)</span></span></div>
+      <div class="kv"><span>Statistical significance (t)</span><span class="${(ms.t_ic || 0) >= 2 ? "up" : "warn"}">${ms.t_ic != null ? ms.t_ic.toFixed(1) : "–"} <span class="mute">(≥ 2 = significant)</span></span></div>
       <div class="kv"><span>Outcomes inside 50% range</span><span>${Math.round(ms.cov50_oos * 100)}% <span class="mute">(target 50%)</span></span></div>
       <div class="kv"><span>Outcomes inside 80% range</span><span>${Math.round(ms.cov80_oos * 100)}% <span class="mute">(target 80%)</span></span></div>
       ${fc.acc ? `<div class="kv"><span>This asset: 1-month calls right</span><span class="${fc.acc.dir >= 0.6 ? "up" : fc.acc.dir < 0.5 ? "down" : "warn"}">${Math.round(fc.acc.dir * 100)}% (${fc.acc.n})</span></div>` : ""}
