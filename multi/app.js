@@ -126,10 +126,11 @@ function tradePlan(r, h) {
     const cands = [r.st_dir === 1 ? r.st_stop : null, ms.swing_lo20 != null ? ms.swing_lo20 - 0.25 * atr : null, sup[0] != null ? sup[0] - 0.25 * atr : null]
       .filter((x) => x != null && x < price - 1.0 * atr && x > price - 3.5 * atr);
     plan.stop = cands.length ? Math.max(...cands) : price - 2 * atr;
-    const T = [f.med, fcAt(fc, h).hi50, f.hi80];
-    if (T[0] <= price + 0.3 * atr) T[0] = res.find((p) => p > price + 0.5 * atr) ?? price + 1.5 * (price - plan.stop);
-    plan.targets = T.map((t, i) => Math.max(t, i ? T[i - 1] : t)).map((t) => ({ price: t, p: probAbove(fc, h, t) }));
     plan.risk = price - plan.stop;
+    let t1 = f.med;
+    if (t1 <= price + 0.3 * atr) t1 = res.find((p) => p > price + 0.5 * atr && p <= f.hi80) ?? Math.max(f.hi50, price + 0.5 * atr);
+    const t2 = Math.max(f.hi80, t1 + 0.5 * plan.risk), t3 = Math.max(f.hi90, t2 + 0.5 * plan.risk);
+    plan.targets = [t1, t2, t3].map((t) => ({ price: t, p: probAbove(fc, h, t) }));
     plan.pStop = 1 - probAbove(fc, h, plan.stop);
     plan.obstacle = res.find((p) => p > price && p < plan.targets[0].price);
   } else if (dir === -1) {
@@ -138,10 +139,11 @@ function tradePlan(r, h) {
     const cands = [r.st_dir === -1 ? r.st_stop : null, ms.swing_hi20 != null ? ms.swing_hi20 + 0.25 * atr : null, res[0] != null ? res[0] + 0.25 * atr : null]
       .filter((x) => x != null && x > price + 1.0 * atr && x < price + 3.5 * atr);
     plan.stop = cands.length ? Math.min(...cands) : price + 2 * atr;
-    const T = [f.med, f.lo50, f.lo80];
-    if (T[0] >= price - 0.3 * atr) T[0] = sup.find((p) => p < price - 0.5 * atr) ?? price - 1.5 * (plan.stop - price);
-    plan.targets = T.map((t, i) => Math.min(t, i ? T[i - 1] : t)).map((t) => ({ price: t, p: 1 - probAbove(fc, h, t) }));
     plan.risk = plan.stop - price;
+    let t1 = f.med;
+    if (t1 >= price - 0.3 * atr) t1 = sup.find((p) => p < price - 0.5 * atr && p >= f.lo80) ?? Math.min(f.lo50, price - 0.5 * atr);
+    const t2 = Math.min(f.lo80, t1 - 0.5 * plan.risk), t3 = Math.min(f.lo90, t2 - 0.5 * plan.risk);
+    plan.targets = [t1, t2, t3].map((t) => ({ price: t, p: 1 - probAbove(fc, h, t) }));
     plan.pStop = probAbove(fc, h, plan.stop);
     plan.obstacle = sup.find((p) => p < price && p > plan.targets[0].price);
   }
@@ -622,7 +624,7 @@ function planCard(r, plan) {
     h += `<div class="pgrid">
       <div><div class="l">${side} zone</div><div class="v">${px(plan.entryLo)} – ${px(plan.entryHi)}</div></div>
       <div><div class="l">Stop loss</div><div class="v down">${px(plan.stop)}</div><div class="s">${pc(plan.stop)} · ${(plan.risk / plan.atr).toFixed(1)} ATR</div></div>
-      ${plan.targets.map((t, i) => `<div><div class="l">Target ${i + 1}${i === 0 ? " (base case)" : i === 1 ? " (good case)" : " (stretch)"}</div><div class="v up">${px(t.price)}</div><div class="s">${pc(t.price)} · ${t.R.toFixed(1)}R · ${Math.round(t.p * 100)}% chance</div></div>`).join("")}
+      ${plan.targets.map((t, i) => `<div><div class="l">Target ${i + 1}${i === 0 ? " (first)" : i === 1 ? " (good case)" : " (stretch)"}</div><div class="v up">${px(t.price)}</div><div class="s">${pc(t.price)} · ${t.R.toFixed(1)}R · ${Math.round(t.p * 100)}% chance</div></div>`).join("")}
       <div><div class="l">Reward : risk (T2)</div><div class="v">${plan.rr.toFixed(2)} : 1</div></div>
       <div><div class="l">Size for 1% account risk</div><div class="v">${Math.min(plan.size, 999).toFixed(0)}%</div><div class="s">of account (notional)</div></div>
       <div><div class="l">Chance of closing past stop</div><div class="v">${Math.round(plan.pStop * 100)}%</div><div class="s">by ${niceD(S.fdate)}</div></div>
@@ -954,7 +956,7 @@ const METHOD = `
 <tr><td>5. Ranges</td><td>Built from the model's real historical errors, not a textbook bell curve, so fat tails and skew are kept. That gives the base case (median), 50%, 80% and 90% ranges, and the chance of finishing above any price.</td></tr>
 <tr><td>6. Cycle</td><td>The dominant price cycle is projected for turning dates and only added to the price path when it beat the model on that asset's own history.</td></tr>
 <tr><td>7. Signal</td><td>Conviction (−100 to +100) = 50% forecast odds + 25% daily trend + 15% weekly trend + 10% swing structure. ≥ +55 STRONG BUY, ≥ +25 BUY, ≤ −25 SELL, ≤ −55 STRONG SELL. A buy is blocked when daily and weekly trends are both down, and vice-versa.</td></tr>
-<tr><td>8. Trade plan</td><td>Entry zone within ½ ATR of price (or the nearest support/resistance); stop beyond the ATR trail / 20-day swing / nearest level, kept between 1 and 3.5 ATR; targets = the forecast's base, good (75th pct) and stretch (90th pct) cases; R-multiples, probability of reaching each by the date, and position size for 1% account risk.</td></tr>
+<tr><td>8. Trade plan</td><td>Entry zone within ½ ATR of price (or the nearest support/resistance); stop beyond the ATR trail / 20-day swing / nearest level, kept between 1 and 3.5 ATR; targets = the base case (or the nearest level / edge of the 50% range when the base case is flat), then the 80% and 90% range edges, always progressively further; R-multiples, probability of reaching each by the date, and position size for 1% account risk.</td></tr>
 </table>
 <p><strong>Reading it honestly:</strong> even professional models are right on direction only ~52–58% of the time over days to weeks; the edge comes from sizing and stops, not certainty. Trust the ranges more than the single base-case number, and favour signals where the model's out-of-sample IC is positive and the asset's own hit rate is above 55%.</p>
 
