@@ -171,7 +171,14 @@ function draw() {
   const dayPerBar = horizonBars();
   const daily = ["1D", "1W"].includes(T.tf) && r.fc;
   const sigTf = volTf(b);
-  const useCyc = !!cyc;
+  let passTurns = [], allTurns = [], tStats = null;
+  if (cyc) {
+    for (let k = 1; k < F - 1; k++) { const a = cyc.at(k - 1), c = cyc.at(k), d = cyc.at(k + 1); if (c > a && c >= d) allTurns.push({ k, type: "high" }); if (c < a && c <= d) allTurns.push({ k, type: "low" }); }
+    tStats = turnStats(b, cyc.periods);
+    allTurns.forEach((m, i) => { const rk = tStats.rank[Math.min(i, 3)]; m.prob = rk.p; m.n = rk.n; m.edge = rk.p - tStats.base; m.rank = i + 1; });
+    passTurns = allTurns.filter((m) => m.n >= 6 && m.prob >= T.minProb && m.edge >= 0.08);
+  }
+  const useCyc = passTurns.length > 0; // low-probability cycles are excluded from the forecast entirely
   const decay = (k) => (cyc ? Math.exp(-k / (6 * Math.max(...cyc.periods))) : 0); // slow fade: cycles lose precision far out
   const path = (k) => { // centre of the forecast in log terms, k bars ahead
     let m = 0;
@@ -225,14 +232,10 @@ function draw() {
   let fcS = null, futMarks = []; T.allTurns = []; T.turnStats = null;
   if (T.tog.fc) {
     fcS = line(ft.map((t, k) => ({ time: t, value: price * Math.exp(path(k)) })), "#f2b33d", 2, 2);
-    leg.push(["#f2b33d", daily ? "Forecast — model drift + cycle" : "Forecast — projected cycle"]);
+    leg.push(["#f2b33d", useCyc ? (daily ? "Forecast — model + high-probability cycle" : "Forecast — high-probability cycle") : daily ? "Forecast — model centre (no cycle passed the probability test)" : "Forecast — centre (no cycle passed the probability test)"]);
+    T.allTurns = allTurns; T.turnStats = tStats;
     if (useCyc && T.tog.turns) {
-      const all = [];
-      for (let k = 1; k < F - 1; k++) { const a = cyc.at(k - 1), c = cyc.at(k), d = cyc.at(k + 1); if (c > a && c >= d) all.push({ k, type: "high" }); if (c < a && c <= d) all.push({ k, type: "low" }); }
-      const ts = turnStats(b, cyc.periods);
-      all.forEach((m, i) => { const rk = ts.rank[Math.min(i, 3)]; m.prob = rk.p; m.n = rk.n; m.edge = rk.p - ts.base; m.rank = i + 1; });
-      T.allTurns = all; T.turnStats = ts;
-      futMarks = all.filter((m) => m.n >= 6 && m.prob >= T.minProb && m.edge >= 0.08);
+      futMarks = passTurns;
       fcS.setMarkers(futMarks.map((m) => ({ time: fut[m.k - 1], position: m.type === "high" ? "aboveBar" : "belowBar", color: m.type === "high" ? "#f0565b" : "#22c38e", shape: "circle", size: 0.6 })));
     }
   }
@@ -273,7 +276,7 @@ function draw() {
     os.setData(b.map((x, i) => (osc[i] == null ? { time: x.t } : { time: x.t, value: osc[i], color: osc[i] > 2 ? "#f0565b" : osc[i] < -2 ? "#22c38e" : "#f2b33d" })));
     [[2, "rgba(240,86,91,.6)"], [1, "rgba(240,86,91,.25)"], [0, "#3a4352"], [-1, "rgba(34,195,142,.25)"], [-2, "rgba(34,195,142,.6)"]].forEach(([v, c]) => os.createPriceLine({ price: v, color: c, lineWidth: 1, lineStyle: 2, axisLabelVisible: Math.abs(v) === 2, title: v ? `${v > 0 ? "+" : ""}${v}σ` : "" }));
     // projected oscillator cycle: sine of the price cycle's period fitted to the oscillator
-    if (cyc && T.tog.fc) {
+    if (cyc && useCyc && T.tog.fc) {
       const m = Math.min(300, n - 20), y = osc.slice(-m).map((v) => v ?? 0), W = cyc.periods.map((p) => 2 * Math.PI / p), P = Math.max(...cyc.periods);
       const beta = solve(y.map((_, t) => [1, ...W.flatMap((w) => [Math.sin(w * t), Math.cos(w * t)])]), y);
       const at = (t) => W.reduce((s, w, i) => s + beta[1 + 2 * i] * Math.sin(w * t) + beta[2 + 2 * i] * Math.cos(w * t), 0);
@@ -305,6 +308,13 @@ function draw() {
     ch.timeScale().subscribeVisibleLogicalRangeChange(() => requestAnimationFrame(place));
     ch.subscribeCrosshairMove(() => {}); setTimeout(place, 60); setTimeout(place, 300);
     T.placeLabels = place;
+  }
+  if (T.tog.fc && cyc && !useCyc) {
+    el.style.position = "relative";
+    const nb = document.createElement("div"); nb.className = "fcnote";
+    const best = allTurns.length ? Math.max(...allTurns.map((m) => m.prob)) : 0;
+    nb.innerHTML = `No turning date reaches ${Math.round(T.minProb * 100)}% probability on ${T.tf} (best ${Math.round(best * 100)}%, chance ${Math.round((tStats ? tStats.base : 0) * 100)}%).<br>Showing the tested forecast only: centre line + calibrated ranges.`;
+    el.appendChild(nb);
   }
   T.cyc = cyc; T.futMarks = futMarks; T.LV = LV; T.path = path; T.band = band; T.price = price;
   $("tNote").innerHTML = (cyc ? `Showing ${futMarks.length} of ${(T.allTurns || []).length} projected turns (≥ ${Math.round(T.minProb * 100)}% probability) · cycles ≈ ${cyc.periods.join(" / ")} bars · fit ${(cyc.strength * 100).toFixed(0)}%` : "No cycle detected") +
