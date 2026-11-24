@@ -45,7 +45,7 @@ jobs:
       - name: Build multi-asset screener
         run: |
           python multi/scripts/build_data.py
-          node multi/scripts/signals.mjs multi/data || echo "signals step failed"
+          node multi/scripts/signals.mjs multi/data --track || echo "signals step failed"
           mkdir -p site/multi
           cp -r multi/*.html multi/*.js multi/*.css multi/vendor multi/data site/multi/
           touch site/.nojekyll
@@ -55,8 +55,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add multi/data/fundamentals.json 2>/dev/null || true
+          git add multi/data/track.json 2>/dev/null || true
           if ! git diff --cached --quiet; then
-            git commit -m "Fundamentals cache $(date -u +%F)"
+            git commit -m "Data: fundamentals cache / live track record $(date -u +'%F %H:%M')"
             git pull --rebase -q origin main && git push || echo "push skipped"
           fi
       - uses: actions/upload-pages-artifact@v3

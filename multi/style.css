@@ -193,3 +193,12 @@ tbody tr.sel{background:rgba(91,140,255,.10)}
 .termlink{display:inline-flex;align-items:center;padding:7px 12px;border-radius:7px;background:var(--acc);color:#fff;text-decoration:none;font-weight:600;font-size:13px;margin-left:4px;white-space:nowrap}
 .termbtn{display:inline-block;margin:8px 0 2px;padding:6px 12px;border-radius:8px;background:var(--acc);color:#fff;text-decoration:none;font-weight:600;font-size:13px}
 .tsl{font:11.5px var(--mono);color:var(--mute);margin-left:4px}
+#track{max-width:1200px}
+.tmet{grid-template-columns:repeat(auto-fit,minmax(170px,1fr));margin:12px 0}
+.tcurve{width:100%;max-width:820px;height:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px}
+table.trk{min-width:900px}
+.metric{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.metric .m{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.metric .l{font-size:10.5px;color:var(--mute);text-transform:uppercase;letter-spacing:.3px}
+.metric .v{font:600 22px var(--mono)} .metric .s{font:11px var(--mono);color:var(--mute)}
+#track h3{margin-top:18px}
