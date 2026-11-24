@@ -127,7 +127,8 @@ for (const [tf, syms] of Object.entries(series)) {
   R.trail.sort((a, b) => b.train.pf - a.train.pf);
   R.byFilter = {}; for (const f of ["none", "ema200", "daily"]) { const x = R.trail.filter((t) => t.cfg.filt === f); if (x.length) R.byFilter[f] = x[0]; }
   R.bestTrail = R.trail[0];
-  R.currentTrail = R.trail.find((x) => x.cfg.n === 10 && x.cfg.m === 3 && x.cfg.filt === "none");
+  const LIVE_CFG = { "1D": { n: 20, m: 3, filt: "none" }, "4H": { n: 10, m: 5, filt: "ema200" }, "1H": { n: 20, m: 5, filt: "daily" } }[tf];
+  R.currentTrail = R.trail.find((x) => LIVE_CFG && x.cfg.n === LIVE_CFG.n && x.cfg.m === LIVE_CFG.m && x.cfg.filt === LIVE_CFG.filt);
   console.log(tf, "best trail", JSON.stringify(R.bestTrail), "current", JSON.stringify(R.currentTrail));
 }
 function trailRaw(b, g) {

@@ -87,12 +87,37 @@ function chartOpts(el) {
 }
 function horizonBars() { const tfDays = { "15m": 1 / 26, "1H": 1 / 6.5, "4H": 0.6, "1D": 1, "1W": 5 }; return tfDays[T.tf]; }
 
+/* Settings per timeframe, chosen by the walk-forward accuracy test (scripts/accuracy.mjs, data/accuracy.json):
+   only settings profitable/positive in BOTH the older and newer halves of the test data are used. */
+const TF_CFG = {
+  "1W": { nCyc: 1, win: 300, stN: 20, stM: 3, filt: "none" },
+  "1D": { nCyc: 1, win: 300, stN: 20, stM: 3, filt: "none" },
+  "4H": { nCyc: 2, win: 300, stN: 10, stM: 5, filt: "ema200" },
+  "1H": { nCyc: 2, win: 300, stN: 20, stM: 5, filt: "daily" },
+  "15m": { nCyc: 2, win: 300, stN: 20, stM: 5, filt: "daily" },
+};
+// intraday cone calibration: the plain normal cone was too wide (50% band held ~56%, 80% held ~82.5%)
+const CONE_CAL = [1, 1, 1, 0.94, 0.9, 0.87, 0.87, 1, 0.87, 0.87, 0.9, 0.94, 1, 1, 1];
+function dailyTrailDir(b) { // previous completed day's ATR-trail direction for each intraday bar (no look-ahead)
+  const days = []; b.forEach((x) => { const k = Math.floor(x.t / 86400), L = days[days.length - 1]; if (L && L.k === k) { L.h = Math.max(L.h, x.h); L.l = Math.min(L.l, x.l); L.c = x.c; } else days.push({ k, o: x.o, h: x.h, l: x.l, c: x.c }); });
+  const s = stA(days, 10, 3), idx = {}; days.forEach((d, i) => (idx[d.k] = i));
+  return b.map((x) => { const i = idx[Math.floor(x.t / 86400)]; return i > 0 ? s.dir[i - 1] : 0; });
+}
+function accFor(tf) { // tested results for this timeframe's settings
+  const A = T.acc && T.acc.tf && T.acc.tf[tf]; if (!A) return null; const c = TF_CFG[tf];
+  const tr = (A.trail || []).find((x) => x.cfg.n === c.stN && x.cfg.m === c.stM && x.cfg.filt === c.filt);
+  const tu = (A.turns || []).find((x) => x.cfg.nCyc === c.nCyc && x.cfg.win === c.win);
+  return { tr, tu, cone: A.cone, symbols: A.symbols, date: T.acc.generated };
+}
 function draw() {
   const r = T.r, b = T.bars;
+  const CFG = TF_CFG[T.tf] || TF_CFG["1D"]; Object.assign(TM, CFG);
   T.charts.forEach((c) => c.remove()); T.charts = []; T.s = {};
   if (!b.length) return;
   const n = b.length, last = b[n - 1], price = last.c;
-  const atr = atrA(b), st = stA(b), osc = oscA(b), rsi = rsiA(b);
+  const atr = atrA(b), st = stA(b, CFG.stN, CFG.stM), osc = oscA(b), rsi = rsiA(b);
+  const e200s = emaA(b.map((x) => x.c), 200), dDir = CFG.filt === "daily" ? dailyTrailDir(b) : null;
+  const sigOk = (i, d) => CFG.filt === "none" || (CFG.filt === "ema200" && e200s[i] != null && (d === 1 ? b[i].c > e200s[i] : b[i].c < e200s[i])) || (CFG.filt === "daily" && dDir[i] === d);
   const cyc = multiCycle(b.map((x) => Math.log(x.c)));
   const F = Math.min(180, Math.max(60, cyc ? Math.round(1.5 * Math.max(...cyc.periods)) : 60));
   const fut = futureTimes(last.t, F, T.tf, r); T.futT = fut;
@@ -116,7 +141,7 @@ function draw() {
   };
   const band = (k, i) => { // quantile price k bars ahead, i = index in GRID_P
     if (daily) { const h = k * dayPerBar * (r.fc.calendar && T.tf === "1W" ? 7 / 5 : 1); const md = model(r.fc, h); return price * Math.exp(path(k) + md.q[i] * md.s); }
-    return price * Math.exp(path(k) + NORM_Q[i] * sigTf * Math.sqrt(k));
+    return price * Math.exp(path(k) + NORM_Q[i] * CONE_CAL[i] * sigTf * Math.sqrt(k));
   };
   // ---------------- main chart
   const el = $("cMain"); el.innerHTML = "";
@@ -138,7 +163,7 @@ function draw() {
   if (T.tog.ema) { const c = b.map((x) => x.c); [[20, "#f2b33d"], [50, "#5b8cff"], [200, "#9b7bff"]].forEach(([p, col]) => { const e = emaA(c, p); line(b.map((x, i) => (e[i] == null ? { time: x.t } : { time: x.t, value: e[i] })), col); leg.push([col, `EMA ${p}`]); }); }
   if (T.tog.trail) {
     const s = line(b.map((x, i) => (st.stop[i] == null ? { time: x.t } : { time: x.t, value: st.stop[i], color: st.dir[i] === 1 ? "#22c38e" : "#f0565b" })), "#22c38e", 2, 0);
-    leg.push(["#22c38e", "Trail (ATR 10×3) — support in uptrend / resistance in downtrend"]);
+    leg.push(["#22c38e", `Trail (ATR ${CFG.stN}×${CFG.stM})`]);
   }
   if (T.tog.corr) {
     const rc = regChan(b), m = rc.m, start = n - m;
@@ -154,7 +179,7 @@ function draw() {
   const drift = (k) => { if (!daily || !k) return 0; const md = model(r.fc, hd(k)); return md.mz * md.s; };
   const halfW = (k) => { if (!k) return 0; if (daily) { const md = model(r.fc, hd(k)); return (md.q[9] - md.q[5]) / 2 * md.s; } return 0.674 * sigTf * Math.sqrt(k); };
   let cM = 1e-12; if (cyc) for (let j = 1; j <= F; j++) cM = Math.max(cM, Math.abs(cyc.at(j) - cyc.at(0)));
-  const coneAt = (k, i) => { if (!k) return price; if (daily) { const md = model(r.fc, hd(k)); return price * Math.exp(drift(k) + md.q[i] * md.s); } return price * Math.exp(NORM_Q[i] * sigTf * Math.sqrt(k)); };
+  const coneAt = (k, i) => { if (!k) return price; if (daily) { const md = model(r.fc, hd(k)); return price * Math.exp(drift(k) + md.q[i] * md.s); } return price * Math.exp(NORM_Q[i] * CONE_CAL[i] * sigTf * Math.sqrt(k)); };
   const waveAt = (k) => (!k ? price : price * Math.exp(drift(k) + (cyc ? 1.3 * halfW(k) * (cyc.at(k) - cyc.at(0)) / cM : 0)));
   if (T.tog.fvol) {
     // shaded cone between the 80% edges
@@ -182,7 +207,7 @@ function draw() {
   const mk = [];
   if (T.tog.sig) { // entry signals only: BUY when the ATR trail flips up, SELL when it flips down
     for (let i = 1; i < n; i++) {
-      if (st.dir[i] !== st.dir[i - 1] && st.stop[i - 1] != null) mk.push({ time: b[i].t, position: st.dir[i] === 1 ? "belowBar" : "aboveBar", color: st.dir[i] === 1 ? "#22c38e" : "#f0565b", shape: st.dir[i] === 1 ? "arrowUp" : "arrowDown", text: st.dir[i] === 1 ? "BUY" : "SELL" });
+      if (st.dir[i] !== st.dir[i - 1] && st.stop[i - 1] != null && sigOk(i, st.dir[i])) mk.push({ time: b[i].t, position: st.dir[i] === 1 ? "belowBar" : "aboveBar", color: st.dir[i] === 1 ? "#22c38e" : "#f0565b", shape: st.dir[i] === 1 ? "arrowUp" : "arrowDown", text: st.dir[i] === 1 ? "BUY" : "SELL" });
     }
   }
   if (T.tog.turns && useCyc) {
@@ -196,6 +221,8 @@ function draw() {
     LV.sup.forEach((l, i) => cs.createPriceLine({ price: l.p, color: "rgba(34,195,142,.5)", lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: `S${i + 1}` }));
   }
   if (r.fc && T.tog.fc) { const p = planNow(); if (p && p.dir) { cs.createPriceLine({ price: p.stop, color: "#f0565b", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "STOP" }); p.targets.forEach((t, i) => cs.createPriceLine({ price: t.price, color: "#22c38e", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: `T${i + 1}` })); } }
+  const AC = accFor(T.tf);
+  if (T.tog.sig) leg.push(["#22c38e", `BUY/SELL${CFG.filt === "ema200" ? " (with 200-EMA trend)" : CFG.filt === "daily" ? " (with daily trend)" : ""}` + (AC && AC.tr ? ` — tested on ${AC.symbols} assets: profit factor ${AC.tr.valid.pf.toFixed(2)}, ${Math.round(AC.tr.valid.win * 100)}% wins, ${AC.tr.valid.n} trades` : " — not tested on this timeframe")]);
   $("tLeg").innerHTML = leg.map(([c, t]) => `<span style="--c:${c}">${t}</span>`).join("");
 
   // ---------------- oscillator pane
@@ -370,6 +397,8 @@ function side(light) {
       const hidden = allT.filter((m) => !shown.includes(m));
       if (hidden.length) h += `<p class="note">Hidden (low probability): ${hidden.map((m) => `${m.type} ${fmtT(T.futT[m.k - 1])} (${Math.round(m.prob * 100)}%)`).join(", ")}.</p>`;
       if (ts) h += `<p class="note">Probability = how often the 1st, 2nd, 3rd… projected turn matched a real swing ${m_tol(ts)} in ${ts.tests} replayed forecasts on this asset's ${T.tf} history (chance level ${Math.round(ts.base * 100)}%). A turn is shown only if it reaches your threshold <i>and</i> beats chance by 5+ points. Cycles ≈ ${T.cyc.periods.join(", ")} bars · fit ${(T.cyc.strength * 100).toFixed(0)}%.</p>`;
+      const AC = accFor(T.tf);
+      if (AC && AC.tu) h += `<h4>Accuracy test · ${T.tf} · ${AC.symbols} assets</h4><div class="metric"><div class="m"><div class="l">Dates that matched a real swing</div><div class="v">${Math.round(AC.tu.valid.hit * 100)}%</div><div class="s">vs ${Math.round(AC.tu.valid.base * 100)}% by chance</div></div><div class="m"><div class="l">Wave direction right</div><div class="v">${Math.round(AC.tu.valid.dir * 100)}%</div><div class="s">50% = coin flip</div></div>${AC.tr ? `<div class="m"><div class="l">BUY/SELL profit factor</div><div class="v ${AC.tr.valid.pf > 1 ? "up" : "down"}">${AC.tr.valid.pf.toFixed(2)}</div><div class="s">${Math.round(AC.tr.valid.win * 100)}% wins · ${AC.tr.valid.n} trades</div></div>` : ""}${AC.cone && AC.cone[20] ? `<div class="m"><div class="l">Cone check (raw)</div><div class="v" style="font-size:14px">${Math.round(AC.cone[20].c50 * 100)}% / ${Math.round(AC.cone[20].c80 * 100)}%</div><div class="s">inside 50% / 80% bands → now calibrated</div></div>` : ""}</div><p class="note">Out-of-sample: settings chosen on the older half of ${AC.date.slice(0, 10)}'s test data, results shown for the newer half. Re-run weekly.</p>`;
     }
     B.innerHTML = h;
     B.querySelectorAll("#mp button").forEach((x) => (x.onclick = () => { T.minProb = +x.dataset.v; LS.set("term_minprob4", T.minProb); draw(); side(); }));
@@ -502,6 +531,7 @@ document.addEventListener("fullscreenchange", () => setTimeout(draw, 200));
 
 async function boot() {
   S.data = await fetchJ("data/screener.json?" + Date.now());
+  T.acc = await fetchJ("data/accuracy.json?" + Date.now()).catch(() => null);
   Object.entries(S.data.classes).forEach(([c, l]) => l.forEach((x) => (x._cls = c)));
   [...$("tTog").children].forEach((x) => x.classList.toggle("on", !!T.tog[x.dataset.k]));
   const q = new URLSearchParams(location.search);
