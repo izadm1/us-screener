@@ -192,3 +192,4 @@ tbody tr.sel{background:rgba(91,140,255,.10)}
 .keybox button{margin-right:6px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 12px}
 .termlink{display:inline-flex;align-items:center;padding:7px 12px;border-radius:7px;background:var(--acc);color:#fff;text-decoration:none;font-weight:600;font-size:13px;margin-left:4px;white-space:nowrap}
 .termbtn{display:inline-block;margin:8px 0 2px;padding:6px 12px;border-radius:8px;background:var(--acc);color:#fff;text-decoration:none;font-weight:600;font-size:13px}
+.tsl{font:11.5px var(--mono);color:var(--mute);margin-left:4px}

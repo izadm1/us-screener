@@ -40,6 +40,7 @@ jobs:
         continue-on-error: true
         run: |
           python multi/scripts/build_data.py
+          node multi/scripts/signals.mjs multi/data || echo "signals step failed"
           mkdir -p site/multi
           cp -r multi/*.html multi/*.js multi/*.css multi/vendor multi/data site/multi/
           touch site/.nojekyll

@@ -1,6 +1,6 @@
 /* Shared by the screener (app.js) and the terminal (terminal.js): dates, model forecast, trade plan, formatting. */
 /* Multi-Asset Screener front end. Reads data/screener.json built by scripts/build_data.py */
-const S = { data: null, cls: "stocks", sort: { key: "fchg", dir: -1 }, preset: null, funding: {}, chart: null, rsiChart: null, view: "forecast", fdate: null };
+const S = { data: null, cls: "stocks", sort: { key: "ts", dir: -1 }, preset: null, funding: {}, chart: null, rsiChart: null, view: "forecast", fdate: null };
 const $ = (id) => document.getElementById(id);
 
 /* ---------------- forecast maths (mirrors scripts/forecast.py) ---------------- */

@@ -1,4 +1,6 @@
 const PRESETS = {
+  "★ Fresh tested BUYs": { ts: 1 },
+  "★ Fresh tested SELLs": { ts: -1 },
   "Strong buys": { plan: "STRONG BUY" },
   "All buys": { plan: "BUY" },
   "Sells": { plan: "SELL" },
@@ -15,11 +17,31 @@ const PRESETS = {
   "Avoid list": { sig: "Downtrend" },
 };
 
+/* ---------------- tested signals (data/signals.json, computed with the terminal's maths) ---------------- */
+const SG = (r) => (S.sig && S.sig.assets && S.sig.assets[r.sym]) || null;
+const TS_SHORT = { TRAIL: "Trend flip", PULLBACK: "Pullback", SOS: "Wyckoff SOS", SOW: "Wyckoff SOW", SC: "Wyckoff SC", ST: "Wyckoff ST", LPS: "Wyckoff LPS", LPSY: "Wyckoff LPSY", Spring: "Wyckoff Spring", UT: "Wyckoff UT", UTAD: "Wyckoff UTAD", BC: "Wyckoff BC" };
+function tsScore(r) { const g = SG(r); if (!g || !g.best) return g && g.trail ? g.trail.dir * 0.01 : null; const x = g.best; return x.side * (x.pf * 10 + x.win * 5 - x.bars * 0.3); }
+function tsCell(r) {
+  const g = SG(r); if (!g) return '<span class="mute">—</span>';
+  const x = g.best;
+  if (x) return `<span class="sigchip ${x.side > 0 ? "sb2" : "ss2"}" title="${x.name} on ${x.date}; tested ${Math.round(x.win * 100)}% wins, profit factor ${x.pf.toFixed(2)} over ${x.n} trades">★ ${x.side > 0 ? "BUY" : "SELL"}</span> <span class="tsl">${TS_SHORT[x.type] || x.type} · PF ${x.pf.toFixed(2)} · ${x.bars ? x.bars + "d" : "today"}</span>`;
+  return `<span class="mute tsl">trend ${g.trail.dir > 0 ? "▲" : "▼"} · no fresh signal</span>`;
+}
+function testedCard(r) {
+  const g = SG(r); if (!g) return "";
+  const x = g.best, px = fmt.px;
+  if (!x) { const l = g.last; return `<div class="plan sn"><div class="l">★ Tested signal (daily)</div><div class="big">NO FRESH SIGNAL</div><p class="note" style="margin:6px 0 0">No tested signal in the last 5 days.${l ? ` Latest: <b class="${l.side > 0 ? "up" : "down"}">${l.side > 0 ? "BUY" : "SELL"}</b> — ${l.name}, ${niceD(l.date)} (${l.bars} days ago, ${fmt.pct(l.move, 1)} since${l.stopped ? ", stopped out" : ""}).` : ""} Wyckoff phase: ${g.wyckoff.phase === "none" ? "trending" : g.wyckoff.phase}.</p></div>`; }
+  return `<div class="plan ${x.side > 0 ? "sb2" : "ss2"}"><div class="planhead"><div><div class="l">★ Tested signal (daily)</div><div class="big">${x.side > 0 ? "BUY" : "SELL"}</div></div><div class="conv"><div class="l">Tested profit factor</div><div class="cv">${x.pf.toFixed(2)}</div><div style="font:11px var(--mono);color:var(--mute)">${Math.round(x.win * 100)}% wins · ${x.n} trades</div></div></div>
+    <div class="pgrid"><div><div class="l">Trigger</div><div class="v" style="font-size:13px">${x.name}</div><div class="s">${niceD(x.date)} · ${x.bars ? x.bars + " days ago" : "today"}</div></div><div><div class="l">Entry (signal close)</div><div class="v">${px(x.price)}</div><div class="s">now ${px(x.now)} (${fmt.pct(x.move, 2)})</div></div>
+    <div><div class="l">Stop / invalidation</div><div class="v down">${px(x.stop)}</div><div class="s">risk ${fmt.pct(x.risk, 2)}</div></div><div><div class="l">${x.half ? "Take ½ at 1R" : "1R target"}</div><div class="v up">${px(x.tp1)}</div><div class="s">${x.half ? "then stop to breakeven" : ""}</div></div><div><div class="l">Hold</div><div class="v" style="font-size:13px">${x.hold}</div></div></div>
+    <p class="note">Out-of-sample tested on 29 assets (${S.sig.tested.date ? S.sig.tested.date.slice(0, 10) : ""}). Profit factor > 1 = made money overall; about half of these trades still lose, so always use the stop.</p></div>`;
+}
 const COLS = [
   { k: "sym", t: "Symbol", f: (r) => `<span class="sym">${disp(r)}</span><span class="nm">${r.name || ""}${r.group ? " · " + r.group : ""}</span>` },
   { k: "price", t: "Price", f: (r) => fmt.px(r.price) },
   { k: "chg1d", t: "1D", f: (r) => `<span class="${cls(r.chg1d)}">${fmt.pct(r.chg1d)}</span>` },
-  { k: "bs", t: "Signal", f: (r) => sigChip(r._p) },
+  { k: "ts", t: "★ Tested signal", f: (r) => tsCell(r) },
+  { k: "bs", t: "Model view", f: (r) => sigChip(r._p) },
   { k: "fmed", t: "Base case", v: "forecast", f: (r) => r._f ? `<b>${fmt.px(r._f.med)}</b>` : "–" },
   { k: "fchg", t: "Est. Δ", v: "forecast", f: (r) => r._f ? `<span class="${cls(r._f.chg)}">${fmt.pct(r._f.chg)}</span>` : "–" },
   { k: "frng", t: "Likely range (50%)", v: "forecast", sortable: false, f: (r) => r._f ? `<span class="rng">${fmt.px(r._f.lo50)} – ${fmt.px(r._f.hi50)}</span>` : "–" },
@@ -92,6 +114,7 @@ async function load() {
     return;
   }
   Object.entries(S.data.classes).forEach(([c, list]) => list.forEach((x) => (x._cls = c)));
+  try { S.sig = await (await fetch("data/signals.json?" + Date.now())).json(); } catch (e) { S.sig = null; }
   const g = new Date(S.data.generated);
   $("updated").textContent = "data as of " + g.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
   renderRegime();
@@ -138,6 +161,7 @@ function buildControls() {
       if (cfg.sort) { S.sort = { key: cfg.sort, dir: -1 }; setView("forecast"); }
       if (cfg.acc) setView("forecast");
       if (cfg.plan) { setView("forecast"); S.sort = { key: "bs", dir: cfg.plan === "SELL" ? 1 : -1 }; }
+      if (cfg.ts) { S.sort = { key: "ts", dir: cfg.ts > 0 ? -1 : 1 }; }
     }
     [...$("presets").children].forEach((b) => b.classList.toggle("on", b.dataset.p === p && p !== ""));
     render();
@@ -189,12 +213,14 @@ function rows() {
     (!$("noExt").checked || !(x.signals || []).includes("Overextended")) &&
     (!(S.preset && PRESETS[S.preset].quality) || (x.fscore ?? 0) >= 6) &&
     (!(S.preset && PRESETS[S.preset].acc) || ((x.fc && x.fc.acc && x.fc.acc.dir) || 0) >= PRESETS[S.preset].acc) &&
+    (!(S.preset && PRESETS[S.preset].ts) || (SG(x) && SG(x).best && SG(x).best.side === PRESETS[S.preset].ts)) &&
     (!(S.preset && PRESETS[S.preset].plan) || (x._p && (PRESETS[S.preset].plan === "STRONG BUY" ? x._p.sig === "STRONG BUY" : x._p.sig.includes(PRESETS[S.preset].plan)))));
   const { key, dir } = S.sort;
   const val = (x) => {
     switch (key) {
       case "funding": return S.funding[futSym(x)];
       case "bs": return x._p ? x._p.conv : null;
+      case "ts": return tsScore(x);
       case "fmed": case "fchg": return x._f ? x._f.chg : null;
       case "pup": return x._f ? x._f.pup : null;
       case "acc": return x.fc && x.fc.acc ? x.fc.acc.dir : null;
@@ -373,6 +399,22 @@ function pickRow(p, i, H) {
     <div class="pkscore"><div class="v ${sell ? "down" : "up"}">${p.ps.toFixed(0)}</div><div class="l">${sell ? "sell" : "buy"} score</div></div>
   </div>`;
 }
+function renderBestTested() {
+  if (!S.sig) return "";
+  const classes = PK.universe === "tradeable" ? ["stocks", "etfs", "crypto"] : PK.universe === "all" ? ["stocks", "etfs", "crypto", "forex", "indices"] : [PK.universe];
+  const rows = []; classes.forEach((c) => (S.data.classes[c] || []).forEach((r) => { const g = SG(r); if (g && g.best && !LEVERAGED.has(r.sym)) rows.push({ r, x: g.best }); }));
+  const rank = (a, b) => b.x.pf - a.x.pf || b.x.win - a.x.win || a.x.bars - b.x.bars;
+  const buys = rows.filter((y) => y.x.side > 0).sort(rank).slice(0, 8), sells = rows.filter((y) => y.x.side < 0).sort(rank).slice(0, 8);
+  const clsLabel = { stocks: "Stock", etfs: "ETF", crypto: "Crypto", indices: "Index", forex: "Forex" };
+  const item = ({ r, x }, i) => `<div class="pk" data-s="${r.sym}"><div class="pkrank ${x.side > 0 ? "rb" : "rs"}">${i + 1}</div><div class="pkmain">
+      <div class="pkline"><span class="sym">${disp(r)}</span><span class="chip">${clsLabel[r._cls]}</span><span class="chip ${x.side > 0 ? "g" : "r"}">${TS_SHORT[x.type] || x.type}</span><span class="pkname">${x.bars ? x.bars + "d ago" : "today"}</span></div>
+      <div class="pkline mono"><span>entry ${fmt.px(x.price)}</span><span class="down">stop ${fmt.px(x.stop)}</span><span class="up">${x.half ? "½ at" : "1R"} ${fmt.px(x.tp1)}</span><span class="mute">now ${fmt.pct(x.move, 1)}</span></div></div>
+      <div class="pkscore"><div class="v ${x.side > 0 ? "up" : "down"}">${x.pf.toFixed(2)}</div><div class="l">PF · ${Math.round(x.win * 100)}% win</div></div></div>`;
+  const col = (list, side) => `<section class="pkcard ${side}"><div class="pkt"><h3>${side === "buy" ? "▲ Best tested BUYs" : "▼ Best tested SELLs"}</h3><span>fresh (≤5 days), not stopped out</span></div>${list.length ? list.map(item).join("") : `<p class="note">No fresh tested ${side} signals right now.</p>`}</section>`;
+  const T0 = S.sig.tested || {};
+  return `<section class="bs"><div class="bshead"><div><h2>★ Best tested signals now</h2><p class="note">Only signal types that made money in walk-forward testing (newer half of 5 years of data, 29 assets): trend flip with ½ off at 1R${T0.trail ? ` (PF ${T0.trail.pf.toFixed(2)}, ${Math.round(T0.trail.win * 100)}% wins)` : ""}, RSI(2) pullback with the market trend${T0.pullback ? ` (PF ${T0.pullback.pf.toFixed(2)}, ${Math.round(T0.pullback.win * 100)}% wins)` : ""}, and ★ Wyckoff events (${Object.entries(T0.wyckoff || {}).map(([k, v]) => `${k} ${v.pf.toFixed(2)}`).join(", ")}). Ranked by tested profit factor, then freshness.</p></div></div>
+    <div class="bsgrid">${col(buys, "buy")}${col(sells, "sell")}</div></section>`;
+}
 function renderBuySell() {
   const H = HORIZONS.find((x) => x.id === PK.bsH);
   const classes = [PK.bsCls];
@@ -390,7 +432,7 @@ function renderPicks() {
   let warn = "";
   if (eq === "Risk-off" || cr === "Risk-off") warn = `<div class="pkwarn">⚠ Market backdrop: equities <b>${eq || "–"}</b>, crypto <b>${cr || "–"}</b>. In risk-off conditions even the best-ranked longs fail more often — consider smaller size or waiting.</div>`;
   let h = `<div class="pkhead"><div><h2>Top Picks</h2><p class="note">Ranked from today's data (${new Date(S.data.generated).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}). Only assets in an uptrend, not in distress; short horizons also skip overextended moves. Click any pick for its chart and forecast.</p></div>
-    <label class="pkuni">Universe <select id="pkUni">${[["tradeable", "Stocks + ETFs + Crypto"], ["all", "Everything incl. Forex"], ["stocks", "Stocks"], ["etfs", "ETFs"], ["crypto", "Crypto"], ["forex", "Forex"], ["indices", "Indices"]].map(([v, l]) => `<option value="${v}" ${PK.universe === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>${warn}${renderBuySell()}<h2 class="pksec">Top 5 buys by holding period</h2><div class="pkgrid">`;
+    <label class="pkuni">Universe <select id="pkUni">${[["tradeable", "Stocks + ETFs + Crypto"], ["all", "Everything incl. Forex"], ["stocks", "Stocks"], ["etfs", "ETFs"], ["crypto", "Crypto"], ["forex", "Forex"], ["indices", "Indices"]].map(([v, l]) => `<option value="${v}" ${PK.universe === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>${warn}${renderBestTested()}${renderBuySell()}<h2 class="pksec">Top 5 buys by holding period</h2><div class="pkgrid">`;
   HORIZONS.forEach((H) => {
     const picks = topPicks(H);
     h += `<section class="pkcard"><div class="pkt"><h3>${H.t}</h3><span>${H.sub}</span></div>`;
@@ -447,7 +489,7 @@ function forecastSection(r) {
   const plan = planFor(r), f = plan ? plan.f : fcFor(r);
   const unit = fc.calendar ? "days" : "trading days";
   const px = fmt.px;
-  let h = planCard(r, plan);
+  let h = testedCard(r) + `<h3 style="margin-top:14px">Model view</h3>` + planCard(r, plan);
   h += `<h3>Where the price is expected to be on ${niceD(S.fdate)} <span class="mute" style="text-transform:none">(${f.h} ${unit})</span></h3>
   <div class="expect">
     <div class="ex main"><div class="l">Base case (median)</div><div class="v">${px(f.med)}</div><div class="${cls(f.chg)}">${fmt.pct(f.chg, 2)}</div></div>

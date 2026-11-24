@@ -226,6 +226,7 @@ async function refreshSnapshot() {
     if (!S.data || d.generated === S.data.generated) return;
     const live = {}; Object.values(S.data.classes).forEach((l) => l.forEach((r) => { if (r._live) live[r.sym] = r.price; }));
     S.data = d; LIVE.base = {}; LIVE.hist = {};
+    try { S.sig = await (await fetch("data/signals.json?" + Date.now(), { cache: "no-store" })).json(); } catch (e) {}
     Object.entries(S.data.classes).forEach(([c, list]) => list.forEach((x) => (x._cls = c)));
     renderRegime();
     for (const [s, p] of Object.entries(live)) await applyLive(bySym()[s], p);
