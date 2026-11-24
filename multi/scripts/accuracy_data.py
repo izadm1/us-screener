@@ -12,7 +12,8 @@ os.makedirs(OUT, exist_ok=True)
 
 
 def dump(df, path):
-    df = df[["Open", "High", "Low", "Close", "Volume"]].dropna(subset=["Close"])
+    df = df[["Open", "High", "Low", "Close", "Volume"]].dropna(subset=["Open", "High", "Low", "Close"])
+    df = df[(df.Close > 0) & (df.High >= df.Low)]
     idx = df.index.tz_convert("UTC") if df.index.tz is not None else df.index
     rec = [{"t": int(t.timestamp()), "o": float(o), "h": float(h), "l": float(l), "c": float(c), "v": float(v) if v == v else 0.0}
            for t, o, h, l, c, v in zip(idx, df.Open, df.High, df.Low, df.Close, df.Volume)]

@@ -14,7 +14,9 @@ const H = 20, COST = { equity: 0.001, crypto: 0.002, forex: 0.0004 };
 const clsOf = (s) => (s.endsWith("-USD") ? "crypto" : s.endsWith("_X") || s === "GC_F" || s === "SI_F" ? "forex" : "equity");
 
 const data = {};
-for (const f of fs.readdirSync(DIR).filter((f) => f.endsWith("__1D.json"))) { const b = JSON.parse(fs.readFileSync(path.join(DIR, f))); if (b.length >= 400) data[f.replace("__1D.json", "")] = b; }
+const good = (x) => [x.o, x.h, x.l, x.c].every((v) => Number.isFinite(v) && v > 0) && x.h >= x.l;
+for (const f of fs.readdirSync(DIR).filter((f) => f.endsWith("__1D.json"))) { const b = JSON.parse(fs.readFileSync(path.join(DIR, f))).filter(good).map((x) => ({ ...x, v: Number.isFinite(x.v) ? x.v : 0 })); if (b.length >= 400) data[f.replace("__1D.json", "")] = b; }
+process.on("uncaughtException", (e) => { console.error("META ERROR", e.stack); fs.writeFileSync(OUT, JSON.stringify({ generated: new Date().toISOString(), error: String(e.stack || e) })); process.exit(0); });
 const regMap = (b) => { const e = M.emaA(b.map((x) => x.c), 200), m = {}; b.forEach((x, i) => { if (e[i] != null) m[Math.floor(x.t / 86400) + 1] = x.c > e[i] ? 1 : -1; }); return m; };
 const REG = { equity: data.SPY ? regMap(data.SPY) : {}, crypto: data["BTC-USD"] ? regMap(data["BTC-USD"]) : {} };
 const regAt = (c, t) => { if (c === "forex") return 0; const m = REG[c === "crypto" ? "crypto" : "equity"]; for (let k = 0; k < 6; k++) { const v = m[Math.floor(t / 86400) - k]; if (v) return v; } return 0; };
@@ -22,7 +24,8 @@ const regAt = (c, t) => { if (c === "forex") return 0; const m = REG[c === "cryp
 // ---------- build the labelled sample ----------
 const S = [];
 for (const [sym, b] of Object.entries(data)) {
-  const cls = clsOf(sym), ctx = M.metaPrep(b, cls === "equity" ? "stocks" : cls, regAt);
+  let ctx; const cls = clsOf(sym);
+  try { ctx = M.metaPrep(b, cls === "equity" ? "stocks" : cls, regAt); } catch (e) { console.log("skip", sym, e.message); continue; }
   for (const k of M.metaCands(ctx, 252)) {
     if (k.i + 1 >= b.length) continue;
     const e = b[k.i].c, risk = Math.abs(e - k.stop), costR = (COST[cls] * e) / risk, row = { sym, cls, kind: k.kind, side: k.side, t: b[k.i].t, f: M.metaFeat(ctx, k), y: {}, r: {} };
