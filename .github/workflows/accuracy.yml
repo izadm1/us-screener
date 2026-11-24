@@ -1,0 +1,38 @@
+name: Terminal accuracy test
+
+# Walk-forward accuracy test of the Forecast Terminal's turning dates, wave direction, volatility cone
+# and BUY/SELL trail signals. Writes multi/data/accuracy.json (shown in the terminal).
+on:
+  push:
+    branches: [main]
+    paths: ["multi/scripts/accuracy*", "multi/tmath.js", ".github/workflows/accuracy.yml"]
+  schedule:
+    - cron: "17 3 * * 0"   # weekly, Sunday 11:17 MYT
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: pip install -r requirements.txt
+      - run: python multi/scripts/accuracy_data.py /tmp/acc
+      - run: node multi/scripts/accuracy.mjs /tmp/acc multi/data/accuracy.json
+      - name: Save report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add multi/data/accuracy.json
+          git diff --cached --quiet || git commit -m "Terminal accuracy report $(date -u +%F)"
+          for i in 1 2 3; do git pull --rebase -q origin main && git push && break; sleep 5; done
