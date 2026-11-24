@@ -190,3 +190,5 @@ tbody tr.sel{background:rgba(91,140,255,.10)}
 .keybox{position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:80;background:var(--panel);border:1px solid var(--acc);border-radius:12px;padding:14px;width:min(420px,92vw);box-shadow:0 10px 40px rgba(0,0,0,.6)}
 .keybox input{width:100%;margin:6px 0;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px}
 .keybox button{margin-right:6px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 12px}
+.termlink{display:inline-flex;align-items:center;padding:7px 12px;border-radius:7px;background:var(--acc);color:#fff;text-decoration:none;font-weight:600;font-size:13px;margin-left:4px;white-space:nowrap}
+.termbtn{display:inline-block;margin:8px 0 2px;padding:6px 12px;border-radius:8px;background:var(--acc);color:#fff;text-decoration:none;font-weight:600;font-size:13px}

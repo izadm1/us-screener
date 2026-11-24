@@ -26,7 +26,8 @@ DATA = os.path.join(ROOT, "data")
 HIST = os.path.join(DATA, "history")
 FUND_CACHE = os.path.join(DATA, "fundamentals.json")
 FUND_MAX_AGE_DAYS = 7
-HIST_BARS = 260
+HIST_BARS = 400
+INTRA = os.path.join(DATA, "intraday")
 
 
 # ---------------------------------------------------------------- download
@@ -371,6 +372,37 @@ def crypto_sentiment():
 
 
 # ---------------------------------------------------------------- output
+def write_intraday(symbols):
+    """1-hour bars (last 60 days) for the terminal's 1H / 4H views (crypto comes live from Binance)."""
+    import yfinance as yf
+    os.makedirs(INTRA, exist_ok=True)
+    n = 0
+    for i in range(0, len(symbols), 40):
+        chunk = symbols[i:i + 40]
+        try:
+            raw = yf.download(chunk, period="60d", interval="60m", group_by="ticker", auto_adjust=True,
+                              threads=True, progress=False)
+        except Exception as e:
+            print("intraday failed", e)
+            continue
+        for t in chunk:
+            try:
+                df = raw[t] if isinstance(raw.columns, pd.MultiIndex) else raw
+                df = df[["Open", "High", "Low", "Close", "Volume"]].dropna(subset=["Close"])
+                if len(df) < 50:
+                    continue
+                idx = df.index.tz_convert("UTC") if df.index.tz is not None else df.index
+                rec = {"t": [int(x.timestamp()) for x in idx],
+                       **{k: [clean(v) for v in df[c].round(6).values] for k, c in
+                          [("o", "Open"), ("h", "High"), ("l", "Low"), ("c", "Close"), ("v", "Volume")]}}
+                with open(os.path.join(INTRA, safe_name(t) + ".json"), "w") as fh:
+                    json.dump(rec, fh, separators=(",", ":"))
+                n += 1
+            except Exception:
+                pass
+    print("intraday files:", n)
+
+
 def safe_name(sym):
     return "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in sym)
 
@@ -454,6 +486,8 @@ def build(frames=None, fundamentals=None, sentiment=None):
         rows.sort(key=lambda r: -(r["score"] or 0))
         result["classes"][cls] = [{k: clean(v) for k, v in r.items()} for r in rows]
         print(f"{cls}: {len(rows)} symbols")
+    if os.environ.get("SKIP_INTRADAY") != "1":
+        write_intraday(U.STOCKS + U.ETFS + list(U.FOREX))
     macro, regime = macro_block(frames)
     result["macro"], result["regime"], result["crypto_sentiment"] = macro, regime, sentiment
     with open(os.path.join(DATA, "screener.json"), "w") as fh:

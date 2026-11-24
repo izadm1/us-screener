@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Cache-Control" content="no-cache">
+<meta name="build" content="__V__">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forecast Terminal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=__V__">
+<link rel="stylesheet" href="terminal.css?v=__V__">
+<script src="vendor/lightweight-charts.standalone.production.js"></script>
+</head>
+<body class="term">
+<header class="tbar">
+  <a class="tback" href="./" title="Back to the screener">◆ <b>Forecast Terminal</b></a>
+  <button class="tsym" id="tSym" title="Change symbol ( / )"><span id="tSymName">…</span> <span class="caret">▾</span></button>
+  <span class="tpx" id="tPx">–</span><span class="tchg" id="tChg"></span>
+  <div class="tgroup" id="tTf">
+    <button data-tf="15m">15m</button><button data-tf="1H">1H</button><button data-tf="4H">4H</button><button data-tf="1D" class="on">1D</button><button data-tf="1W">1W</button>
+  </div>
+  <div class="tgroup pills" id="tTog">
+    <button data-k="trail" class="on">TRAIL</button>
+    <button data-k="filter" class="on">σ FILTER</button>
+    <button data-k="fc" class="on">FORECAST</button>
+    <button data-k="fvol" class="on">FORECAST VOL</button>
+    <button data-k="corr">σ CORRIDOR</button>
+    <button data-k="turns" class="on">TURNS</button>
+    <button data-k="lv" class="on">LEVELS</button>
+    <button data-k="sig" class="on">SIGNALS</button>
+    <button data-k="ema">EMA</button>
+  </div>
+  <div class="tright">
+    <span class="tlive" id="tLive"></span>
+    <button class="ticon" id="tFull" title="Full screen">⛶</button>
+  </div>
+</header>
+
+<div class="tmain">
+  <section class="tcharts">
+    <div class="tohlc" id="tOhlc"></div>
+    <div class="tleg" id="tLeg"></div>
+    <div id="cMain" class="cmain"></div>
+    <div class="plabel" id="oscLabel">σ FILTER — price deviation from its 20-bar mean in standard deviations, with the projected cycle</div>
+    <div id="cOsc" class="cosc"></div>
+    <div class="tnote" id="tNote"></div>
+  </section>
+  <aside class="tside">
+    <nav class="stabs" id="sTabs">
+      <button data-t="watch" class="on">WATCHLIST</button><button data-t="signal">SIGNAL</button><button data-t="fc">FORECAST</button><button data-t="deriv">DERIVATIVES</button><button data-t="alerts">ALERTS</button>
+    </nav>
+    <div class="sbody" id="sBody"></div>
+  </aside>
+</div>
+
+<div class="search" id="search" hidden>
+  <div class="sbox">
+    <input id="sIn" placeholder="Search stocks, ETFs, indices, crypto, forex…" autocomplete="off">
+    <div class="sres" id="sRes"></div>
+  </div>
+</div>
+<div class="toasts" id="toasts"></div>
+
+<script src="core.js?v=__V__"></script>
+<script src="terminal.js?v=__V__"></script>
+</body>
+</html>
