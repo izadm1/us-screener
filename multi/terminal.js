@@ -55,6 +55,32 @@ function cycleFit(vals, pmin = 8, pmax = 64) { // dominant cycle (periodogram) +
   let sse = 0, sst = 0; rl.forEach((v, t) => { const f = a * Math.sin(w * t) + bb * Math.cos(w * t); sse += (v - f) ** 2; sst += v * v; });
   return { P, amp, phase: (w * (m - 1) + phi) % (2 * Math.PI), strength: Math.max(0, 1 - sse / (sst || 1e-12)), m };
 }
+function solve(A, y) { // small dense least squares via normal equations + Gaussian elimination
+  const p = A[0].length, M = Array.from({ length: p }, () => new Array(p + 1).fill(0));
+  A.forEach((row, i) => { for (let a = 0; a < p; a++) { M[a][p] += row[a] * y[i]; for (let b = 0; b < p; b++) M[a][b] += row[a] * row[b]; } });
+  for (let a = 0; a < p; a++) M[a][a] += 1e-9;
+  for (let c = 0; c < p; c++) { let piv = c; for (let r = c + 1; r < p; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r; [M[c], M[piv]] = [M[piv], M[c]]; for (let r = 0; r < p; r++) { if (r === c || !M[c][c]) continue; const f = M[r][c] / M[c][c]; for (let k = c; k <= p; k++) M[r][k] -= f * M[c][k]; } }
+  return M.map((r, i) => r[p] / (r[i] || 1e-12));
+}
+function multiCycle(vals, nCyc = 3) { // superposition of the strongest cycles (periodogram peaks), fitted jointly
+  const x = vals.slice(-300), n = x.length;
+  if (n < 60) return null;
+  const xm = (n - 1) / 2, ym = x.reduce((s, v) => s + v, 0) / n; let sxy = 0, sxx = 0; x.forEach((v, i) => { sxy += (i - xm) * (v - ym); sxx += (i - xm) ** 2; });
+  const sl = sxy / sxx, res = x.map((v, i) => v - (ym + sl * (i - xm)));
+  const pmax = Math.min(120, Math.floor(n / 2.5)), pw = [];
+  for (let p = 8; p <= pmax; p++) { const w = 2 * Math.PI / p; let c = 0, s = 0; res.forEach((v, t) => { c += v * Math.cos(w * t); s += v * Math.sin(w * t); }); pw.push({ p, pw: (c * c + s * s) / n }); }
+  const peaks = pw.filter((q, i) => (i === 0 || q.pw >= pw[i - 1].pw) && (i === pw.length - 1 || q.pw >= pw[i + 1].pw)).sort((a, b) => b.pw - a.pw);
+  const P = [];
+  for (const q of peaks) { if (P.every((p) => Math.max(p, q.p) / Math.min(p, q.p) > 1.3)) P.push(q.p); if (P.length >= nCyc) break; }
+  if (!P.length) return null;
+  const W = P.map((p) => 2 * Math.PI / p);
+  const A = res.map((_, t) => [1, ...W.flatMap((w) => [Math.sin(w * t), Math.cos(w * t)])]);
+  const beta = solve(A, res);
+  const at = (t) => W.reduce((s, w, i) => s + beta[1 + 2 * i] * Math.sin(w * t) + beta[2 + 2 * i] * Math.cos(w * t), 0);
+  let sse = 0, sst = 0; res.forEach((v, t) => { sse += (v - beta[0] - at(t)) ** 2; sst += v * v; });
+  const amps = W.map((_, i) => Math.hypot(beta[1 + 2 * i], beta[2 + 2 * i]));
+  return { P: P[0], periods: P, amps, strength: Math.max(0, 1 - sse / (sst || 1e-12)), m: n, at: (k) => at(n - 1 + k), fitAt: at, amp: amps[0] };
+}
 const cycAt = (c, k) => c.amp * Math.sin(c.phase + 2 * Math.PI * k / c.P); // k = bars from last (negative = past)
 function swings(b, k = 3) { const hi = [], lo = []; for (let i = k; i < b.length - k; i++) { let H = true, L = true; for (let j = i - k; j <= i + k; j++) { if (b[j].h > b[i].h) H = false; if (b[j].l < b[i].l) L = false; } if (H) hi.push(i); if (L) lo.push(i); } return { hi, lo }; }
 function levels(b, atr) {
@@ -93,7 +119,7 @@ function futureTimes(lastT, n, tf, r) {
 }
 
 /* ================= chart ================= */
-const fmtT = (t) => { const d = new Date(t * 1000); return ["1D", "1W"].includes(T.tf) ? d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : d.toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); };
+const fmtT = (t) => { const d = new Date(t * 1000); return ["1D", "1W"].includes(T.tf) ? d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : d.toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); };
 function chartOpts(el) {
   return { width: el.clientWidth, height: el.clientHeight, layout: { background: { color: "#0b0e13" }, textColor: "#8a93a3", fontFamily: "IBM Plex Mono", fontSize: 11 },
     grid: { vertLines: { color: "#141a23" }, horzLines: { color: "#141a23" } }, rightPriceScale: { borderColor: "#232b38", minimumWidth: 86 },
@@ -108,18 +134,18 @@ function draw() {
   if (!b.length) return;
   const n = b.length, last = b[n - 1], price = last.c;
   const atr = atrA(b), st = stA(b), osc = oscA(b), rsi = rsiA(b);
-  const cyc = cycleFit(b.map((x) => Math.log(x.c)));
-  const F = Math.min(160, Math.max(60, cyc ? 2 * cyc.P : 60));
+  const cyc = multiCycle(b.map((x) => Math.log(x.c)));
+  const F = Math.min(180, Math.max(60, cyc ? Math.round(1.5 * Math.max(...cyc.periods)) : 60));
   const fut = futureTimes(last.t, F, T.tf, r); T.futT = fut;
   const dayPerBar = horizonBars();
   const daily = ["1D", "1W"].includes(T.tf) && r.fc;
   const sigTf = volTf(b);
-  const useCyc = cyc && cyc.strength >= 0.15;
-  const decay = (k) => (cyc ? Math.exp(-k / (1.5 * cyc.P)) : 0);
+  const useCyc = !!cyc;
+  const decay = (k) => (cyc ? Math.exp(-k / (6 * Math.max(...cyc.periods))) : 0); // slow fade: cycles lose precision far out
   const path = (k) => { // centre of the forecast in log terms, k bars ahead
     let m = 0;
     if (daily) { const h = k * dayPerBar * (r.fc.calendar && T.tf === "1W" ? 7 / 5 : 1); const md = model(r.fc, h); m = md.mz * md.s; }
-    if (useCyc) m += decay(k) * (cycAt(cyc, k) - cycAt(cyc, 0));
+    if (useCyc) m += decay(k) * (cyc.at(k) - cyc.at(0));
     return m;
   };
   const band = (k, i) => { // quantile price k bars ahead, i = index in GRID_P
@@ -171,7 +197,7 @@ function draw() {
     leg.push(["#f2b33d", daily ? "Forecast — model drift + cycle" : "Forecast — projected cycle"]);
     if (useCyc && T.tog.turns) {
       for (let k = 1; k < F - 1; k++) { const a = path(k - 1), c = path(k), d = path(k + 1); if (c > a && c >= d) futMarks.push({ k, type: "high" }); if (c < a && c <= d) futMarks.push({ k, type: "low" }); }
-      fcS.setMarkers(futMarks.map((m) => ({ time: fut[m.k - 1], position: m.type === "high" ? "aboveBar" : "belowBar", color: m.type === "high" ? "#f0565b" : "#22c38e", shape: m.type === "high" ? "arrowDown" : "arrowUp", text: fmtT(fut[m.k - 1]).replace(/,? \d{4}$/, "") })));
+      fcS.setMarkers(futMarks.map((m) => ({ time: fut[m.k - 1], position: m.type === "high" ? "aboveBar" : "belowBar", color: m.type === "high" ? "#f0565b" : "#22c38e", shape: "circle", size: 0.6 })));
     }
   }
   // candle markers: signals + past turns
@@ -189,7 +215,7 @@ function draw() {
     for (let j = 1; j < hi.length; j++) { const a = hi[j - 1], c = hi[j]; if (c - a < 60 && b[c].h > b[a].h && rsi[c] < rsi[a]) mk.push({ time: b[c].t, position: "aboveBar", color: "#f0565b", shape: "square", text: "DIV" }); }
   }
   if (T.tog.turns && useCyc) {
-    for (let k = -(cyc.m - 2); k < 0; k++) { const a = cycAt(cyc, k - 1), c = cycAt(cyc, k), d = cycAt(cyc, k + 1), i = n - 1 + k; if (i < 1) continue; if (c > a && c >= d) mk.push({ time: b[i].t, position: "aboveBar", color: "rgba(240,86,91,.6)", shape: "circle", size: 0.5 }); if (c < a && c <= d) mk.push({ time: b[i].t, position: "belowBar", color: "rgba(34,195,142,.6)", shape: "circle", size: 0.5 }); }
+    for (let k = -Math.min(cyc.m - 2, n - 2); k < 0; k++) { const a = cyc.at(k - 1), c = cyc.at(k), d = cyc.at(k + 1), i = n - 1 + k; if (i < 1) continue; if (c > a && c >= d) mk.push({ time: b[i].t, position: "aboveBar", color: "rgba(240,86,91,.6)", shape: "circle", size: 0.5 }); if (c < a && c <= d) mk.push({ time: b[i].t, position: "belowBar", color: "rgba(34,195,142,.6)", shape: "circle", size: 0.5 }); }
   }
   mk.sort((a, c) => a.time - c.time); cs.setMarkers(mk);
   // levels
@@ -212,12 +238,11 @@ function draw() {
     [[2, "rgba(240,86,91,.6)"], [1, "rgba(240,86,91,.25)"], [0, "#3a4352"], [-1, "rgba(34,195,142,.25)"], [-2, "rgba(34,195,142,.6)"]].forEach(([v, c]) => os.createPriceLine({ price: v, color: c, lineWidth: 1, lineStyle: 2, axisLabelVisible: Math.abs(v) === 2, title: v ? `${v > 0 ? "+" : ""}${v}σ` : "" }));
     // projected oscillator cycle: sine of the price cycle's period fitted to the oscillator
     if (cyc && T.tog.fc) {
-      const P = cyc.P, m = Math.min(3 * P, n - 20), y = osc.slice(-m), w = 2 * Math.PI / P;
-      let ss = 0, sc = 0, cc = 0, ys = 0, yc = 0; y.forEach((v, t) => { if (v == null) return; const s = Math.sin(w * t), c = Math.cos(w * t); ss += s * s; sc += s * c; cc += c * c; ys += v * s; yc += v * c; });
-      const det = ss * cc - sc * sc || 1e-12, a = (ys * cc - yc * sc) / det, bb = (yc * ss - ys * sc) / det;
-      const at = (t) => a * Math.sin(w * t) + bb * Math.cos(w * t);
+      const m = Math.min(300, n - 20), y = osc.slice(-m).map((v) => v ?? 0), W = cyc.periods.map((p) => 2 * Math.PI / p), P = Math.max(...cyc.periods);
+      const beta = solve(y.map((_, t) => [1, ...W.flatMap((w) => [Math.sin(w * t), Math.cos(w * t)])]), y);
+      const at = (t) => W.reduce((s, w, i) => s + beta[1 + 2 * i] * Math.sin(w * t) + beta[2 + 2 * i] * Math.cos(w * t), 0);
       const pp = oc.addLineSeries({ color: "rgba(242,179,61,.75)", lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
-      pp.setData([{ time: last.t, value: osc[n - 1] }].concat(fut.map((t, k) => ({ time: t, value: osc[n - 1] + (at(m - 1 + k + 1) - at(m - 1)) * Math.exp(-(k + 1) / (2 * P)) }))));
+      pp.setData([{ time: last.t, value: osc[n - 1] }].concat(fut.map((t, k) => ({ time: t, value: osc[n - 1] + (at(m - 1 + k + 1) - at(m - 1)) * Math.exp(-(k + 1) / (6 * P)) }))));
     }
     if (T.tog.sig) { const om = []; const { hi, lo } = swings(b, 3); for (let j = 1; j < lo.length; j++) { const a = lo[j - 1], c = lo[j]; if (c - a < 60 && b[c].l < b[a].l && osc[c] > osc[a]) om.push({ time: b[c].t, position: "belowBar", color: "#22c38e", shape: "arrowUp", text: "DIV" }); } for (let j = 1; j < hi.length; j++) { const a = hi[j - 1], c = hi[j]; if (c - a < 60 && b[c].h > b[a].h && osc[c] < osc[a]) om.push({ time: b[c].t, position: "aboveBar", color: "#f0565b", shape: "arrowDown", text: "DIV" }); } om.sort((x, y) => x.time - y.time); os.setMarkers(om); }
     T.s.os = os;
@@ -226,7 +251,7 @@ function draw() {
   let sync = false;
   T.charts.forEach((c) => c.timeScale().subscribeVisibleLogicalRangeChange((rg) => { if (sync || !rg) return; sync = true; T.charts.forEach((o) => o !== c && o.timeScale().setVisibleLogicalRange(rg)); sync = false; }));
   const show = Math.min(n, 180);
-  T.charts.forEach((c) => c.timeScale().setVisibleLogicalRange({ from: n - show, to: n - 1 + Math.min(F, Math.round(show * 0.55)) }));
+  T.charts.forEach((c) => c.timeScale().setVisibleLogicalRange({ from: n - show, to: n - 1 + F }));
   // crosshair readout
   const ro = (i) => { const x = b[i], ch1 = i ? x.c / b[i - 1].c - 1 : 0; $("tOhlc").innerHTML = `<span>${fmtT(x.t)}</span><span>O <b>${fmt.px(x.o)}</b></span><span>H <b>${fmt.px(x.h)}</b></span><span>L <b>${fmt.px(x.l)}</b></span><span>C <b>${fmt.px(x.c)}</b></span><span class="${cls(ch1)}">${fmt.pct(ch1, 2)}</span>${osc[i] != null ? `<span>σ <b>${osc[i].toFixed(2)}</b></span>` : ""}${rsi[i] != null ? `<span>RSI <b>${rsi[i].toFixed(0)}</b></span>` : ""}`; };
   ro(n - 1);
@@ -235,8 +260,18 @@ function draw() {
     const i = b.findIndex((x) => x.t === p.time); if (i >= 0) return ro(i);
     const k = fut.indexOf(p.time) + 1; if (k > 0) $("tOhlc").innerHTML = `<span>${fmtT(p.time)} · forecast</span><span>Centre <b>${fmt.px(price * Math.exp(path(k)))}</b></span><span>50% <b>${fmt.px(band(k, 5))} – ${fmt.px(band(k, 9))}</b></span><span>80% <b>${fmt.px(band(k, 3))} – ${fmt.px(band(k, 11))}</b></span>`;
   });
+  // boxed date labels at each projected turning point (HTML overlay that follows zoom/scroll)
+  if (fcS && futMarks.length) {
+    el.style.position = "relative";
+    const ov = document.createElement("div"); ov.className = "turnlab"; el.appendChild(ov);
+    const labs = futMarks.map((m) => { const d = document.createElement("span"); d.className = m.type === "high" ? "th" : "tl"; d.textContent = fmtT(fut[m.k - 1]); ov.appendChild(d); return { m, d, t: fut[m.k - 1], p: price * Math.exp(path(m.k)) }; });
+    const place = () => labs.forEach(({ m, d, t, p }) => { const x = ch.timeScale().timeToCoordinate(t), y = fcS.priceToCoordinate(p); if (x == null || y == null || x < 0 || x > el.clientWidth - 90) { d.style.display = "none"; return; } d.style.display = ""; d.style.left = x + "px"; d.style.top = (m.type === "high" ? y - 24 : y + 8) + "px"; });
+    ch.timeScale().subscribeVisibleLogicalRangeChange(() => requestAnimationFrame(place));
+    ch.subscribeCrosshairMove(() => {}); setTimeout(place, 60); setTimeout(place, 300);
+    T.placeLabels = place;
+  }
   T.cyc = cyc; T.futMarks = futMarks; T.LV = LV; T.path = path; T.band = band; T.price = price;
-  $("tNote").innerHTML = (cyc ? `Cycle ≈ ${cyc.P} bars · swing ±${(cyc.amp * 100).toFixed(1)}% · strength ${(cyc.strength * 100).toFixed(0)}%${cyc.strength < 0.3 ? " (weak — rough guide)" : cyc.strength >= 0.5 ? " (clear)" : ""}` : "No cycle detected") +
+  $("tNote").innerHTML = (cyc ? `Cycles ≈ ${cyc.periods.join(" / ")} bars combined · fit ${(cyc.strength * 100).toFixed(0)}%${cyc.strength < 0.3 ? " (weak — dates are rough windows)" : cyc.strength >= 0.55 ? " (strong)" : " (moderate)"}` : "No cycle detected") +
     (daily ? " · Forecast centre and ranges from the validated daily model" : ` · ${T.tf} forecast uses this timeframe's cycle and volatility (no directional model intraday)`) + ` · ${n} bars`;
   T.lastFull = Date.now();
   if (T.tab === "fc" || T.tab === "signal") side();
@@ -351,7 +386,7 @@ function side(light) {
     }
     if (T.cyc) {
       h += `<h4>Projected turning points (${T.tf})</h4>` + (T.futMarks.length ? T.futMarks.slice(0, 8).map((m) => `<div class="alrow"><span class="${m.type === "low" ? "up" : "down"}">${m.type === "low" ? "▼ Cycle low" : "▲ Cycle high"}</span><span>${fmtT(T.futT[m.k - 1])}</span><span>~${fmt.px(T.price * Math.exp(T.path(m.k)))}</span></div>`).join("") : `<p class="note">Cycle too weak to project turning points on this timeframe.</p>`);
-      h += `<p class="note">Cycle period ≈ ${T.cyc.P} bars, strength ${(T.cyc.strength * 100).toFixed(0)}%. Under 30% = weak; treat dates as approximate windows, not exact days.</p>`;
+      h += `<p class="note">Built from the ${T.cyc.periods.length} strongest cycles (${T.cyc.periods.join(", ")} bars), which explain ${(T.cyc.strength * 100).toFixed(0)}% of the recent swings around the trend. Under 30% = weak; treat dates as approximate windows (± a few bars), not exact days.</p>`;
     }
     B.innerHTML = h; return;
   }
