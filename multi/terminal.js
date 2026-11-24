@@ -49,7 +49,7 @@ function turnStats(b, periods) {
   const res = { base, tol, K, rank: rank.map((x) => ({ p: (x.h + 1) / (x.n + 2), n: x.n })), tests: rank[0].n };
   TURN_CACHE[key] = res; return res;
 }
-T.minProb = LS.get("term_minprob4", 0);
+T.minProb = 0;
 const cycAt = (c, k) => c.amp * Math.sin(c.phase + 2 * Math.PI * k / c.P); // k = bars from last (negative = past)
 
 /* ================= data ================= */
@@ -151,7 +151,7 @@ function draw() {
     for (let k = 1; k < F - 1; k++) { const a = cyc.at(k - 1), c = cyc.at(k), d = cyc.at(k + 1); if (c > a && c >= d) allTurns.push({ k, type: "high" }); if (c < a && c <= d) allTurns.push({ k, type: "low" }); }
     tStats = turnStats(b, cyc.periods);
     allTurns.forEach((m, i) => { const rk = tStats.rank[Math.min(i, 3)]; m.prob = rk.p; m.n = rk.n; m.edge = rk.p - tStats.base; m.rank = i + 1; });
-    passTurns = T.minProb === 0 ? allTurns.slice() : allTurns.filter((m) => m.n >= 6 && m.prob >= T.minProb && m.edge >= 0.05);
+    passTurns = allTurns.slice(); // all milestone dates are always shown; each carries its tested probability
   }
   const useCyc = passTurns.length > 0; // low-probability cycles are excluded from the forecast entirely
   const decay = (k) => (cyc ? Math.exp(-k / (6 * Math.max(...cyc.periods))) : 0); // slow fade: cycles lose precision far out
@@ -322,7 +322,7 @@ function draw() {
   }
   T.cyc = cyc; T.futMarks = futMarks; T.LV = LV; T.path = (k) => Math.log(waveAt(k) / price); T.band = (k, i) => coneAt(k, i); T.price = price;
   const ph = wy.phase[n - 1];
-  $("tNote").innerHTML = (T.tog.wy ? `Wyckoff phase: <b>${ph === "none" ? "trending / no range" : ph}</b>${wy.hasVol ? "" : " (price-only, no volume)"} · ` : "") + (cyc ? `Showing ${futMarks.length} of ${(T.allTurns || []).length} projected turns${T.minProb ? ` (≥ ${Math.round(T.minProb * 100)}% probability)` : " (all milestones · hover a date for its tested probability)"} · cycles ≈ ${cyc.periods.join(" / ")} bars · fit ${(cyc.strength * 100).toFixed(0)}%` : "No cycle detected") +
+  $("tNote").innerHTML = (T.tog.wy ? `Wyckoff phase: <b>${ph === "none" ? "trending / no range" : ph}</b>${wy.hasVol ? "" : " (price-only, no volume)"} · ` : "") + (cyc ? `${futMarks.length} projected turning dates (hover a date for its tested probability) · cycles ≈ ${cyc.periods.join(" / ")} bars · fit ${(cyc.strength * 100).toFixed(0)}%` : "No cycle detected") +
     (daily ? " · Forecast centre and ranges from the validated daily model" : ` · ${T.tf} forecast uses this timeframe's cycle and volatility (no directional model intraday)`) + ` · ${n} bars`;
   T.lastFull = Date.now();
   if (T.tab === "fc" || T.tab === "signal") side();
@@ -474,12 +474,12 @@ function side(light) {
     }
     if (T.cyc) {
       const ts = T.turnStats, allT = T.allTurns || [], shown = T.futMarks || [];
-      h += `<h4>High-probability turning points (${T.tf})</h4><div class="hzsel" id="mp">${[0, 0.40, 0.55, 0.65].map((v) => `<button data-v="${v}" class="${Math.abs(v - T.minProb) < 0.001 ? "on" : ""}">${v ? "≥ " + Math.round(v * 100) + "%" : "All"}</button>`).join("")}</div>`;
+      h += `<h4>Projected turning points (${T.tf})</h4>`;
       h += shown.length ? shown.map((m) => `<div class="alrow"><span class="${m.type === "low" ? "up" : "down"}">${m.type === "low" ? "▼ Low" : "▲ High"}</span><span>${fmtT(T.futT[m.k - 1])}</span><span>~${fmt.px(T.price * Math.exp(T.path(m.k)))}</span><b class="${m.prob >= 0.75 ? "up" : ""}">${Math.round(m.prob * 100)}%</b></div>`).join("")
         : `<p class="note"><b>No high-probability turns</b> on this timeframe right now — the projected dates for ${disp(T.r)} haven't been reliable enough in testing. Try another timeframe or a lower threshold.</p>`;
       const hidden = allT.filter((m) => !shown.includes(m));
       if (hidden.length) h += `<p class="note">Hidden (low probability): ${hidden.map((m) => `${m.type} ${fmtT(T.futT[m.k - 1])} (${Math.round(m.prob * 100)}%)`).join(", ")}.</p>`;
-      if (ts) h += `<p class="note">Probability = how often the 1st, 2nd, 3rd… projected turn matched a real swing ${m_tol(ts)} in ${ts.tests} replayed forecasts on this asset's ${T.tf} history (chance level ${Math.round(ts.base * 100)}%). A turn is shown only if it reaches your threshold <i>and</i> beats chance by 5+ points. Cycles ≈ ${T.cyc.periods.join(", ")} bars · fit ${(T.cyc.strength * 100).toFixed(0)}%.</p>`;
+      if (ts) h += `<p class="note">Probability = how often the 1st, 2nd, 3rd… projected turn matched a real swing ${m_tol(ts)} in ${ts.tests} replayed forecasts on this asset's ${T.tf} history (chance level ${Math.round(ts.base * 100)}%). All projected dates are shown; use the probability to judge each one. Cycles ≈ ${T.cyc.periods.join(", ")} bars · fit ${(T.cyc.strength * 100).toFixed(0)}%.</p>`;
       const AC = accFor(T.tf);
       if (AC && AC.tu) h += `<h4>Accuracy test · ${T.tf} · ${AC.symbols} assets</h4><div class="metric"><div class="m"><div class="l">Dates that matched a real swing</div><div class="v">${Math.round(AC.tu.valid.hit * 100)}%</div><div class="s">vs ${Math.round(AC.tu.valid.base * 100)}% by chance</div></div><div class="m"><div class="l">Wave direction right</div><div class="v">${Math.round(AC.tu.valid.dir * 100)}%</div><div class="s">50% = coin flip</div></div>${AC.tr ? `<div class="m"><div class="l">BUY/SELL profit factor</div><div class="v ${AC.tr.valid.pf > 1 ? "up" : "down"}">${AC.tr.valid.pf.toFixed(2)}</div><div class="s">${Math.round(AC.tr.valid.win * 100)}% wins · ${AC.tr.valid.n} trades</div></div>` : ""}${AC.cone && AC.cone[20] ? `<div class="m"><div class="l">Cone check (raw)</div><div class="v" style="font-size:14px">${Math.round(AC.cone[20].c50 * 100)}% / ${Math.round(AC.cone[20].c80 * 100)}%</div><div class="s">inside 50% / 80% bands → now calibrated</div></div>` : ""}</div><p class="note">Out-of-sample: settings chosen on the older half of ${AC.date.slice(0, 10)}'s test data, results shown for the newer half. Re-run weekly.</p>`;
     }
