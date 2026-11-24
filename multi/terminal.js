@@ -111,7 +111,7 @@ function turnStats(b, periods) {
   const res = { base, tol, K, rank: rank.map((x) => ({ p: (x.h + 1) / (x.n + 2), n: x.n })), tests: rank[0].n };
   TURN_CACHE[key] = res; return res;
 }
-T.minProb = LS.get("term_minprob2", 0.55);
+T.minProb = LS.get("term_minprob3", 0.40);
 const cycAt = (c, k) => c.amp * Math.sin(c.phase + 2 * Math.PI * k / c.P); // k = bars from last (negative = past)
 function swings(b, k = 3) { const hi = [], lo = []; for (let i = k; i < b.length - k; i++) { let H = true, L = true; for (let j = i - k; j <= i + k; j++) { if (b[j].h > b[i].h) H = false; if (b[j].l < b[i].l) L = false; } if (H) hi.push(i); if (L) lo.push(i); } return { hi, lo }; }
 function levels(b, atr) {
@@ -176,7 +176,7 @@ function draw() {
     for (let k = 1; k < F - 1; k++) { const a = cyc.at(k - 1), c = cyc.at(k), d = cyc.at(k + 1); if (c > a && c >= d) allTurns.push({ k, type: "high" }); if (c < a && c <= d) allTurns.push({ k, type: "low" }); }
     tStats = turnStats(b, cyc.periods);
     allTurns.forEach((m, i) => { const rk = tStats.rank[Math.min(i, 3)]; m.prob = rk.p; m.n = rk.n; m.edge = rk.p - tStats.base; m.rank = i + 1; });
-    passTurns = allTurns.filter((m) => m.n >= 6 && m.prob >= T.minProb && m.edge >= 0.08);
+    passTurns = allTurns.filter((m) => m.n >= 6 && m.prob >= T.minProb && m.edge >= 0.05);
   }
   const useCyc = passTurns.length > 0; // low-probability cycles are excluded from the forecast entirely
   const decay = (k) => (cyc ? Math.exp(-k / (6 * Math.max(...cyc.periods))) : 0); // slow fade: cycles lose precision far out
@@ -425,15 +425,15 @@ function side(light) {
     }
     if (T.cyc) {
       const ts = T.turnStats, allT = T.allTurns || [], shown = T.futMarks || [];
-      h += `<h4>High-probability turning points (${T.tf})</h4><div class="hzsel" id="mp">${[0.55, 0.65, 0.75].map((v) => `<button data-v="${v}" class="${Math.abs(v - T.minProb) < 0.001 ? "on" : ""}">≥ ${Math.round(v * 100)}%</button>`).join("")}</div>`;
+      h += `<h4>High-probability turning points (${T.tf})</h4><div class="hzsel" id="mp">${[0.40, 0.55, 0.65].map((v) => `<button data-v="${v}" class="${Math.abs(v - T.minProb) < 0.001 ? "on" : ""}">≥ ${Math.round(v * 100)}%</button>`).join("")}</div>`;
       h += shown.length ? shown.map((m) => `<div class="alrow"><span class="${m.type === "low" ? "up" : "down"}">${m.type === "low" ? "▼ Low" : "▲ High"}</span><span>${fmtT(T.futT[m.k - 1])}</span><span>~${fmt.px(T.price * Math.exp(T.path(m.k)))}</span><b class="${m.prob >= 0.75 ? "up" : ""}">${Math.round(m.prob * 100)}%</b></div>`).join("")
         : `<p class="note"><b>No high-probability turns</b> on this timeframe right now — the projected dates for ${disp(T.r)} haven't been reliable enough in testing. Try another timeframe or a lower threshold.</p>`;
       const hidden = allT.filter((m) => !shown.includes(m));
       if (hidden.length) h += `<p class="note">Hidden (low probability): ${hidden.map((m) => `${m.type} ${fmtT(T.futT[m.k - 1])} (${Math.round(m.prob * 100)}%)`).join(", ")}.</p>`;
-      if (ts) h += `<p class="note">Probability = how often the 1st, 2nd, 3rd… projected turn matched a real swing ${m_tol(ts)} in ${ts.tests} replayed forecasts on this asset's ${T.tf} history (chance level ${Math.round(ts.base * 100)}%). A turn is shown only if it reaches your threshold <i>and</i> beats chance by 8+ points. Cycles ≈ ${T.cyc.periods.join(", ")} bars · fit ${(T.cyc.strength * 100).toFixed(0)}%.</p>`;
+      if (ts) h += `<p class="note">Probability = how often the 1st, 2nd, 3rd… projected turn matched a real swing ${m_tol(ts)} in ${ts.tests} replayed forecasts on this asset's ${T.tf} history (chance level ${Math.round(ts.base * 100)}%). A turn is shown only if it reaches your threshold <i>and</i> beats chance by 5+ points. Cycles ≈ ${T.cyc.periods.join(", ")} bars · fit ${(T.cyc.strength * 100).toFixed(0)}%.</p>`;
     }
     B.innerHTML = h;
-    B.querySelectorAll("#mp button").forEach((x) => (x.onclick = () => { T.minProb = +x.dataset.v; LS.set("term_minprob2", T.minProb); draw(); side(); }));
+    B.querySelectorAll("#mp button").forEach((x) => (x.onclick = () => { T.minProb = +x.dataset.v; LS.set("term_minprob3", T.minProb); draw(); side(); }));
     return;
   }
   if (T.tab === "deriv") return deriv(B);
