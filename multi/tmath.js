@@ -140,3 +140,47 @@ function adxA(b, n = 14) {
 function erA(b, n = 20) { return b.map((x, i) => { if (i < n) return null; let path = 0; for (let j = i - n + 1; j <= i; j++) path += Math.abs(b[j].c - b[j - 1].c); return path ? Math.abs(x.c - b[i - n].c) / path : 0; }); }
 if (typeof module !== 'undefined') module.exports.wyckoff = wyckoff;
 if (typeof module !== 'undefined') { module.exports.adxA = adxA; module.exports.erA = erA; }
+
+/* ---------------- Signal-quality model (meta-labelling) — shared by tests, server and terminal ----------------
+   metaPrep: indicator arrays for one asset; metaCands: every candidate signal (trend flip, RSI(2) pullback,
+   Wyckoff event) with its stop; metaFeat: the feature vector the quality model scores. No look-ahead. */
+var META_FEATS = ["side", "isTrail", "isPull", "isWyBull", "isWyBear", "adx", "er", "rsiS", "zS", "e200S", "e50S", "volPct", "regS", "wkS", "wyS", "riskAtr", "volRatio", "mom20S", "isCrypto", "isFx"];
+function metaPrep(b, cls, regAt) {
+  const n = b.length, c = b.map((x) => x.c);
+  const ctx = { b, n, cls, st: stA(b, 20, 3), atr: atrA(b, 14), adx: adxA(b, 14), er: erA(b, 20), rsi: rsiA(b, 14), r2: rsiA(b, 2), e50: emaA(c, 50), e200: emaA(c, 200), wy: wyckoff(b), hasVol: b.filter((x) => x.v > 0).length > 0.8 * n };
+  // weekly trail direction of the previous completed week
+  const wk = []; b.forEach((x) => { const d = new Date(x.t * 1000), k = Math.floor(x.t / 86400) - ((d.getUTCDay() + 6) % 7), L = wk[wk.length - 1]; if (L && L.k === k) { L.h = Math.max(L.h, x.h); L.l = Math.min(L.l, x.l); L.c = x.c; } else wk.push({ k, o: x.o, h: x.h, l: x.l, c: x.c }); });
+  const ws = stA(wk, 10, 3), wi = {}; wk.forEach((w, i) => (wi[w.k] = i));
+  ctx.wk = b.map((x) => { const d = new Date(x.t * 1000), i = wi[Math.floor(x.t / 86400) - ((d.getUTCDay() + 6) % 7)]; return i > 0 ? ws.dir[i - 1] : 0; });
+  ctx.reg = b.map((x) => (regAt ? regAt(cls, x.t) : 0));
+  const atrp = ctx.atr.map((a, i) => (a && c[i] ? a / c[i] : null));
+  ctx.volPct = atrp.map((v, i) => { if (v == null || i < 60) return 0.5; let k = 0, m = 0; for (let j = Math.max(0, i - 251); j <= i; j++) if (atrp[j] != null) { m++; if (atrp[j] < v) k++; } return m ? k / m : 0.5; });
+  return ctx;
+}
+function metaCands(ctx, from) {
+  const { b, n, st, atr, r2, wy, cls } = ctx, out = [];
+  const W8 = { SOS: 1, LPS: 1, SC: 1, ST: 1, Spring: 1, SOW: -1, LPSY: -1, UT: -1, UTAD: -1, BC: -1 };
+  for (let i = Math.max(from || 0, 201); i < n; i++) {
+    if (st.dir[i] !== st.dir[i - 1] && st.stop[i - 1] != null) out.push({ i, side: st.dir[i], kind: "TRAIL", stop: st.stop[i] });
+    const d = st.dir[i];
+    if (st.dir[i] === st.dir[i - 1] && r2[i] != null && r2[i - 1] != null && ((d === 1 && r2[i] < 10 && r2[i - 1] >= 10) || (d === -1 && r2[i] > 90 && r2[i - 1] <= 90))) out.push({ i, side: d, kind: "PULLBACK", stop: st.stop[i] });
+  }
+  wy.events.forEach((e) => { if (e.type === "AR" || e.i < Math.max(from || 0, 201) || !W8[e.type]) return; const lo = Math.min(...b.slice(Math.max(0, e.i - 5), e.i + 1).map((x) => x.l)), hi = Math.max(...b.slice(Math.max(0, e.i - 5), e.i + 1).map((x) => x.h)); out.push({ i: e.i, side: e.side, kind: e.type, stop: e.side > 0 ? lo - 0.25 * atr[e.i] : hi + 0.25 * atr[e.i] }); });
+  return out.filter((x) => { const p = b[x.i].c; return x.stop != null && (x.side > 0 ? x.stop < p : x.stop > p) && Math.abs(p - x.stop) / p < 0.25; }).sort((a, c) => a.i - c.i);
+}
+function metaFeat(ctx, k) {
+  const { b, i, side } = { b: ctx.b, i: k.i, side: k.side }, x = b[i], A = ctx.atr[i] || (x.h - x.l) || 1e-9, s = side;
+  let va = 0; for (let j = Math.max(0, i - 20); j < i; j++) va += b[j].v || 0; va /= 20;
+  let sd = 0; for (let j = Math.max(1, i - 19); j <= i; j++) sd += Math.log(b[j].c / b[j - 1].c) ** 2; sd = Math.sqrt(sd / 20) || 1e-9;
+  const m20 = i >= 20 ? Math.log(x.c / b[i - 20].c) / (sd * Math.sqrt(20)) : 0;
+  let z = 0; if (i >= 19) { const w = b.slice(i - 19, i + 1).map((y) => y.c), m = w.reduce((a, v) => a + v, 0) / 20, d = Math.sqrt(w.reduce((a, v) => a + (v - m) ** 2, 0) / 20); z = d ? (x.c - m) / d : 0; }
+  const cl = (v) => Math.max(-5, Math.min(5, v));
+  const bull = ["SOS", "LPS", "SC", "ST", "Spring"].includes(k.kind), bear = ["SOW", "LPSY", "UT", "UTAD", "BC"].includes(k.kind);
+  return [s, k.kind === "TRAIL" ? 1 : 0, k.kind === "PULLBACK" ? 1 : 0, bull ? 1 : 0, bear ? 1 : 0,
+    (ctx.adx[i] || 0) / 25, ctx.er[i] || 0, ((ctx.rsi[i] || 50) - 50) / 25 * s, cl(z) * s,
+    ctx.e200[i] ? cl((x.c - ctx.e200[i]) / A / 5) * s : 0, ctx.e50[i] && ctx.e200[i] ? Math.sign(ctx.e50[i] - ctx.e200[i]) * s : 0,
+    ctx.volPct[i], ctx.reg[i] * s, ctx.wk[i] * s, (ctx.wy.bias[i] || 0) * s, cl(Math.abs(x.c - k.stop) / A), ctx.hasVol && va ? cl(Math.log(((x.v || 0) + 1) / (va + 1))) : 0, cl(m20) * s,
+    ctx.cls === "crypto" ? 1 : 0, ctx.cls === "forex" ? 1 : 0];
+}
+function metaProb(m, f) { let z = m.coef[0]; for (let j = 0; j < f.length; j++) z += m.coef[j + 1] * ((f[j] - m.mean[j]) / (m.std[j] || 1)); return 1 / (1 + Math.exp(-z)); }
+if (typeof module !== 'undefined') Object.assign(module.exports, { META_FEATS, metaPrep, metaCands, metaFeat, metaProb });

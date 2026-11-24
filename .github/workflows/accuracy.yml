@@ -5,7 +5,7 @@ name: Terminal accuracy test
 on:
   push:
     branches: [main]
-    paths: ["multi/scripts/accuracy*", "multi/tmath.js", ".github/workflows/accuracy.yml"]
+    paths: ["multi/scripts/accuracy*", "multi/scripts/meta.mjs", "multi/tmath.js", ".github/workflows/accuracy.yml"]
   schedule:
     - cron: "17 3 * * 0"   # weekly, Sunday 11:17 MYT
   workflow_dispatch: {}
@@ -16,7 +16,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,12 +27,13 @@ jobs:
         with:
           node-version: "20"
       - run: pip install -r requirements.txt
-      - run: python multi/scripts/accuracy_data.py /tmp/acc
+      - run: python multi/scripts/accuracy_data.py /tmp/acc /tmp/acc_full
       - run: node multi/scripts/accuracy.mjs /tmp/acc multi/data/accuracy.json
+      - run: node multi/scripts/meta.mjs /tmp/acc_full multi/data/meta.json
       - name: Save report
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add multi/data/accuracy.json
+          git add multi/data/accuracy.json multi/data/meta.json
           git diff --cached --quiet || git commit -m "Terminal accuracy report $(date -u +%F)"
           for i in 1 2 3; do git pull --rebase -q origin main && git push && break; sleep 5; done
