@@ -111,7 +111,7 @@ function turnStats(b, periods) {
   const res = { base, tol, K, rank: rank.map((x) => ({ p: (x.h + 1) / (x.n + 2), n: x.n })), tests: rank[0].n };
   TURN_CACHE[key] = res; return res;
 }
-T.minProb = LS.get("term_minprob", 0.65);
+T.minProb = LS.get("term_minprob2", 0.55);
 const cycAt = (c, k) => c.amp * Math.sin(c.phase + 2 * Math.PI * k / c.P); // k = bars from last (negative = past)
 function swings(b, k = 3) { const hi = [], lo = []; for (let i = k; i < b.length - k; i++) { let H = true, L = true; for (let j = i - k; j <= i + k; j++) { if (b[j].h > b[i].h) H = false; if (b[j].l < b[i].l) L = false; } if (H) hi.push(i); if (L) lo.push(i); } return { hi, lo }; }
 function levels(b, atr) {
@@ -441,7 +441,7 @@ function side(light) {
       if (ts) h += `<p class="note">Probability = how often the 1st, 2nd, 3rd… projected turn matched a real swing ${m_tol(ts)} in ${ts.tests} replayed forecasts on this asset's ${T.tf} history (chance level ${Math.round(ts.base * 100)}%). A turn is shown only if it reaches your threshold <i>and</i> beats chance by 8+ points. Cycles ≈ ${T.cyc.periods.join(", ")} bars · fit ${(T.cyc.strength * 100).toFixed(0)}%.</p>`;
     }
     B.innerHTML = h;
-    B.querySelectorAll("#mp button").forEach((x) => (x.onclick = () => { T.minProb = +x.dataset.v; LS.set("term_minprob", T.minProb); draw(); side(); }));
+    B.querySelectorAll("#mp button").forEach((x) => (x.onclick = () => { T.minProb = +x.dataset.v; LS.set("term_minprob2", T.minProb); draw(); side(); }));
     return;
   }
   if (T.tab === "deriv") return deriv(B);
