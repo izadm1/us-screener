@@ -3,7 +3,7 @@
    Uses core.js (model forecast + trade plan) and the data the screener publishes. */
 const T = {
   r: null, tf: "1D", bars: [], charts: [], s: {}, futT: [], lastFull: 0,
-  tog: { trail: 1, filter: 1, fc: 1, fvol: 1, corr: 0, turns: 1, lv: 1, sig: 1, ema: 0 },
+  tog: { trail: 1, filter: 1, fc: 1, fvol: 1, corr: 0, turns: 1, lv: 1, sig: 1, ema: 0, wy: 1 },
   tab: "watch", hz: 21, prices: {}, ws: null, wsSubs: new Set(), opt: null, optExp: null,
 };
 const TF_SEC = { "15m": 900, "1H": 3600, "4H": 14400, "1D": 86400, "1W": 604800 };
@@ -109,6 +109,13 @@ function accFor(tf) { // tested results for this timeframe's settings
   const tu = (A.turns || []).find((x) => x.cfg.nCyc === c.nCyc && x.cfg.win === c.win);
   return { tr, tu, cone: A.cone, symbols: A.symbols, date: T.acc.generated };
 }
+const WY_NAME = { SC: "Selling Climax", AR: "Automatic Rally", ST: "Secondary Test", Spring: "Spring", SOS: "Sign of Strength", LPS: "Last Point of Support", BC: "Buying Climax", UT: "Upthrust", UTAD: "Upthrust After Distribution", SOW: "Sign of Weakness", LPSY: "Last Point of Supply" };
+function wyValidated(tf) { // Wyckoff events that were profitable in BOTH halves of the accuracy test for this timeframe
+  const E = T.acc && T.acc.tf && T.acc.tf[tf] && T.acc.tf[tf].wyck && T.acc.tf[tf].wyck.events; const out = {};
+  if (!E) return out;
+  Object.entries(E).forEach(([k, v]) => { const [type, H] = k.split("|"); if (v.train.pf > 1.1 && v.valid.pf > 1.1 && v.valid.n >= 30 && v.train.n >= 30) { if (!out[type] || v.valid.pf > out[type].pf) out[type] = { H: +H, pf: v.valid.pf, win: v.valid.win, n: v.valid.n }; } });
+  return out;
+}
 function draw() {
   const r = T.r, b = T.bars;
   const CFG = TF_CFG[T.tf] || TF_CFG["1D"]; Object.assign(TM, CFG);
@@ -204,11 +211,32 @@ function draw() {
     }
   }
   // candle markers: signals + past turns
-  const mk = [];
+  const mk = []; T.trailSigs = [];
+  for (let i = 1; i < n; i++) if (st.dir[i] !== st.dir[i - 1] && st.stop[i - 1] != null && sigOk(i, st.dir[i])) T.trailSigs.push({ i, side: st.dir[i] });
   if (T.tog.sig) { // entry signals only: BUY when the ATR trail flips up, SELL when it flips down
     for (let i = 1; i < n; i++) {
       if (st.dir[i] !== st.dir[i - 1] && st.stop[i - 1] != null && sigOk(i, st.dir[i])) mk.push({ time: b[i].t, position: st.dir[i] === 1 ? "belowBar" : "aboveBar", color: st.dir[i] === 1 ? "#22c38e" : "#f0565b", shape: st.dir[i] === 1 ? "arrowUp" : "arrowDown", text: st.dir[i] === 1 ? "BUY" : "SELL" });
     }
+  }
+  // Wyckoff: range, phase, events; ★ = event type validated by the accuracy test on this timeframe
+  const wy = wyckoff(b), VAL = wyValidated(T.tf);
+  T.wy = wy; T.wyVal = VAL;
+  if (T.tog.wy) {
+    wy.events.forEach((e) => {
+      if (e.type === "AR") { mk.push({ time: b[e.i].t, position: "aboveBar", color: "#8a93a3", shape: "circle", size: 0.4, text: "AR" }); return; }
+      const v = VAL[e.type];
+      if (v) mk.push({ time: b[e.i].t, position: e.side > 0 ? "belowBar" : "aboveBar", color: e.side > 0 ? "#2ee6a6" : "#ff6b70", shape: e.side > 0 ? "arrowUp" : "arrowDown", text: `★ ${e.side > 0 ? "BUY" : "SELL"} ${e.type}` });
+      else mk.push({ time: b[e.i].t, position: e.side > 0 ? "belowBar" : "aboveBar", color: "rgba(138,147,163,.8)", shape: "circle", size: 0.4, text: e.type });
+    });
+    // most recent trading range box
+    let ri = n - 1; while (ri > 0 && !wy.rangeAt[ri]) ri--;
+    const R0 = wy.rangeAt[ri];
+    if (R0 && n - 1 - ri < 120) {
+      const col = R0.ctx === "acc" ? "rgba(46,230,166,.75)" : R0.ctx === "dist" ? "rgba(255,107,112,.75)" : "rgba(242,179,61,.7)";
+      const tE = b[Math.min(n - 1, ri)].t, tS = b[R0.start].t;
+      [R0.hi, R0.lo].forEach((p) => line([{ time: tS, value: p }, { time: tE, value: p }], col, 2, 0));
+      T.wyRange = { ...R0, end: ri, live: ri === n - 1 };
+    } else T.wyRange = null;
   }
   if (T.tog.turns && useCyc) {
     for (let k = -Math.min(cyc.m - 2, n - 2); k < 0; k++) { const a = cyc.at(k - 1), c = cyc.at(k), d = cyc.at(k + 1), i = n - 1 + k; if (i < 1) continue; if (c > a && c >= d) mk.push({ time: b[i].t, position: "aboveBar", color: "rgba(240,86,91,.6)", shape: "circle", size: 0.5 }); if (c < a && c <= d) mk.push({ time: b[i].t, position: "belowBar", color: "rgba(34,195,142,.6)", shape: "circle", size: 0.5 }); }
@@ -223,6 +251,7 @@ function draw() {
   if (r.fc && T.tog.fc) { const p = planNow(); if (p && p.dir) { cs.createPriceLine({ price: p.stop, color: "#f0565b", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "STOP" }); p.targets.forEach((t, i) => cs.createPriceLine({ price: t.price, color: "#22c38e", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: `T${i + 1}` })); } }
   const AC = accFor(T.tf);
   if (T.tog.sig) leg.push(["#22c38e", `BUY/SELL${CFG.filt === "ema200" ? " (with 200-EMA trend)" : CFG.filt === "daily" ? " (with daily trend)" : ""}` + (AC && AC.tr ? ` — tested on ${AC.symbols} assets: profit factor ${AC.tr.valid.pf.toFixed(2)}, ${Math.round(AC.tr.valid.win * 100)}% wins, ${AC.tr.valid.n} trades` : " — not tested on this timeframe")]);
+  if (T.tog.wy) { const vk = Object.keys(VAL); leg.push(["#2ee6a6", `Wyckoff — ★ tested signals on ${T.tf}: ${vk.length ? vk.map((k) => `${k} (PF ${VAL[k].pf.toFixed(2)})`).join(", ") : "none passed on this timeframe"} · grey = context only`]); }
   $("tLeg").innerHTML = leg.map(([c, t]) => `<span style="--c:${c}">${t}</span>`).join("");
 
   // ---------------- oscillator pane
@@ -275,12 +304,46 @@ function draw() {
     el.appendChild(nb);
   }
   T.cyc = cyc; T.futMarks = futMarks; T.LV = LV; T.path = (k) => Math.log(waveAt(k) / price); T.band = (k, i) => coneAt(k, i); T.price = price;
-  $("tNote").innerHTML = (cyc ? `Showing ${futMarks.length} of ${(T.allTurns || []).length} projected turns${T.minProb ? ` (≥ ${Math.round(T.minProb * 100)}% probability)` : " (all milestones · hover a date for its tested probability)"} · cycles ≈ ${cyc.periods.join(" / ")} bars · fit ${(cyc.strength * 100).toFixed(0)}%` : "No cycle detected") +
+  const ph = wy.phase[n - 1];
+  $("tNote").innerHTML = (T.tog.wy ? `Wyckoff phase: <b>${ph === "none" ? "trending / no range" : ph}</b>${wy.hasVol ? "" : " (price-only, no volume)"} · ` : "") + (cyc ? `Showing ${futMarks.length} of ${(T.allTurns || []).length} projected turns${T.minProb ? ` (≥ ${Math.round(T.minProb * 100)}% probability)` : " (all milestones · hover a date for its tested probability)"} · cycles ≈ ${cyc.periods.join(" / ")} bars · fit ${(cyc.strength * 100).toFixed(0)}%` : "No cycle detected") +
     (daily ? " · Forecast centre and ranges from the validated daily model" : ` · ${T.tf} forecast uses this timeframe's cycle and volatility (no directional model intraday)`) + ` · ${n} bars`;
   T.lastFull = Date.now();
   if (T.tab === "fc" || T.tab === "signal") side();
 }
 const m_tol = (ts) => `within ±${ts.tol} bar${ts.tol > 1 ? "s" : ""}`;
+function bestSignal() { // freshest signal with the strongest tested record (ATR-trail BUY/SELL or ★ Wyckoff event)
+  const b = T.bars, n = b.length, AC = accFor(T.tf), cands = [];
+  const fresh = { "15m": 16, "1H": 12, "4H": 6, "1D": 5, "1W": 2 }[T.tf] || 5;
+  (T.trailSigs || []).forEach((s) => { if (AC && AC.tr) cands.push({ ...s, src: "ATR trail flip" + (TF_CFG[T.tf].filt === "daily" ? " with daily trend" : TF_CFG[T.tf].filt === "ema200" ? " with 200-EMA trend" : ""), pf: AC.tr.valid.pf, win: AC.tr.valid.win, n: AC.tr.valid.n, hold: "until the trail flips" }); });
+  if (T.wy) T.wy.events.forEach((e) => { const v = T.wyVal && T.wyVal[e.type]; if (v) cands.push({ i: e.i, side: e.side, src: `Wyckoff ${WY_NAME[e.type]} (${e.type})`, pf: v.pf, win: v.win, n: v.n, hold: `about ${v.H} bars` }); });
+  const recent = cands.filter((c) => n - 1 - c.i <= fresh && c.pf > 1).sort((a, b) => b.pf - a.pf || b.i - a.i);
+  const last = cands.sort((a, b) => b.i - a.i)[0];
+  return { best: recent[0] || null, last, fresh };
+}
+function bestCard() {
+  const r = T.r, B = bestSignal(), b = T.bars, x = B.best;
+  const ago = (i) => { const k = b.length - 1 - i; return k === 0 ? "this bar" : `${k} bar${k > 1 ? "s" : ""} ago`; };
+  if (x) {
+    const p = b[x.i].c, atr = atrA(b)[b.length - 1], stop = x.side > 0 ? Math.min(...b.slice(Math.max(0, x.i - 5), x.i + 1).map((y) => y.l)) - 0.25 * atr : Math.max(...b.slice(Math.max(0, x.i - 5), x.i + 1).map((y) => y.h)) + 0.25 * atr;
+    return `<div class="plan ${x.side > 0 ? "sb2" : "ss2"}"><div class="planhead"><div><div class="l">★ Best signal now · ${T.tf}</div><div class="big">${x.side > 0 ? "BUY" : "SELL"}</div></div><div class="conv"><div class="l">Tested profit factor</div><div class="cv">${x.pf.toFixed(2)}</div><div class="s" style="font:11px var(--mono);color:var(--mute)">${Math.round(x.win * 100)}% wins · ${x.n} trades</div></div></div>
+      <div class="pgrid"><div><div class="l">Trigger</div><div class="v" style="font-size:13px">${x.src}</div><div class="s">${fmtT(b[x.i].t)} · ${ago(x.i)}</div></div><div><div class="l">Signal price</div><div class="v">${fmt.px(p)}</div><div class="s">now ${fmt.px(b[b.length - 1].c)} (${fmt.pct(b[b.length - 1].c / p - 1, 2)})</div></div>
+      <div><div class="l">Invalidation</div><div class="v down">${fmt.px(stop)}</div><div class="s">beyond the signal swing</div></div><div><div class="l">Typical hold</div><div class="v" style="font-size:13px">${x.hold}</div></div></div>
+      <p class="note">Ranked by out-of-sample profit factor from the accuracy test. Profit factor above 1 = made money; these signals still lose often, so always use the invalidation level.</p></div>`;
+  }
+  return `<div class="plan sn"><div class="l">★ Best signal now · ${T.tf}</div><div class="big">NO FRESH SIGNAL</div><p class="note" style="margin:6px 0 0">No tested signal in the last ${B.fresh} bars.${B.last ? ` Latest: <b class="${B.last.side > 0 ? "up" : "down"}">${B.last.side > 0 ? "BUY" : "SELL"}</b> — ${B.last.src}, ${fmtT(b[B.last.i].t)} (${ago(B.last.i)}).` : ""}</p></div>`;
+}
+function wyCard() {
+  const wy = T.wy; if (!wy) return "";
+  const n = T.bars.length, ph = wy.phase[n - 1], R0 = T.wyRange, VAL = T.wyVal || {};
+  const evs = wy.events.slice(-8).reverse();
+  const desc = { accumulation: "Trading range after a decline — smart money may be absorbing supply. Watch for SOS (breakout) or a successful test.", distribution: "Trading range after an advance — supply may be entering. Watch for SOW (breakdown) or an upthrust.", markup: "Price broke out of a range — uptrend phase. Pullbacks to the old range top (LPS) are the classic entries.", markdown: "Price broke down from a range — downtrend phase. Rallies to the old range bottom (LPSY) are the classic shorts.", range: "Sideways range without a clear prior trend.", none: "No trading range detected — market is trending." }[ph];
+  return `<h4>Wyckoff analysis · ${T.tf}${wy.hasVol ? "" : " · price-only (no volume)"}</h4>
+    <div class="metric"><div class="m"><div class="l">Phase</div><div class="v" style="font-size:15px;text-transform:capitalize">${ph === "none" ? "Trending" : ph}</div></div><div class="m"><div class="l">Bias</div><div class="v ${wy.bias[n - 1] > 0.1 ? "up" : wy.bias[n - 1] < -0.1 ? "down" : ""}">${wy.bias[n - 1] > 0 ? "+" : ""}${wy.bias[n - 1].toFixed(2)}</div></div>
+    ${R0 ? `<div class="m"><div class="l">Range ${R0.live ? "(active)" : "(last)"}</div><div class="v" style="font-size:13px">${fmt.px(R0.lo)} – ${fmt.px(R0.hi)}</div><div class="s">${R0.ctx === "acc" ? "accumulation" : R0.ctx === "dist" ? "distribution" : "neutral"}</div></div>` : ""}</div>
+    <p class="note">${desc}</p>
+    ${evs.length ? evs.map((e) => { const v = VAL[e.type]; return `<div class="alrow"><span class="${e.side > 0 ? "up" : "down"}">${v ? "★ " : ""}${e.type}</span><span style="font-family:var(--sans);font-size:12px">${WY_NAME[e.type]}</span><span>${fmtT(T.bars[e.i].t)}</span>${v ? `<b class="up">PF ${v.pf.toFixed(2)}</b>` : `<span class="mute">context</span>`}</div>`; }).join("") : `<p class="note">No Wyckoff events in view.</p>`}
+    <p class="note">★ = this event type made money in both halves of the accuracy test on ${T.tf} (shown: newer-half profit factor). Unstarred events did not, so they are shown for context only.</p>`;
+}
 function planNow() { if (!T.r || !T.r.fc) return null; const p = tradePlan(T.r, T.hz); S.fdate = isoD(addBars(T.r.fc.asof, T.hz, T.r.fc.calendar)); return p; }
 
 /* ================= load symbol / timeframe ================= */
@@ -376,7 +439,7 @@ function side(light) {
   if (T.tab === "signal") {
     if (!r.fc) { B.innerHTML = `<p class="note">No model forecast for this asset.</p>`; return; }
     const p = planNow();
-    B.innerHTML = `<div class="hzsel" id="hz">${[[5, "1W"], [21, "1M"], [63, "3M"], [126, "6M"]].map(([h, l]) => `<button data-h="${h}" class="${h === T.hz ? "on" : ""}">${l}</button>`).join("")}</div>${planCard(r, p)}
+    B.innerHTML = bestCard() + wyCard() + `<h4>Model trade plan</h4><div class="hzsel" id="hz">${[[5, "1W"], [21, "1M"], [63, "3M"], [126, "6M"]].map(([h, l]) => `<button data-h="${h}" class="${h === T.hz ? "on" : ""}">${l}</button>`).join("")}</div>${planCard(r, p)}
       <h4>Key levels (${T.tf})</h4>${(T.LV ? T.LV.res.slice().reverse().map((l, i) => `<div class="alrow"><span>Resistance · ${l.n} touch${l.n > 1 ? "es" : ""}</span><span class="down">${fmt.px(l.p)}</span></div>`).join("") + `<div class="alrow"><span><b>Price</b></span><b>${fmt.px(T.price)}</b></div>` + T.LV.sup.map((l) => `<div class="alrow"><span>Support · ${l.n} touch${l.n > 1 ? "es" : ""}</span><span class="up">${fmt.px(l.p)}</span></div>`).join("") : "")}`;
     B.querySelectorAll("#hz button").forEach((x) => (x.onclick = () => { T.hz = +x.dataset.h; side(); draw(); }));
     return;
