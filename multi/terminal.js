@@ -236,6 +236,12 @@ function draw() {
   }
   // Wyckoff: range, phase, events; ★ = event type validated by the accuracy test on this timeframe
   const wy = wyckoff(b), VAL = wyValidated(T.tf);
+  T.hqSigs = [];
+  if (T.tf === "1D" && T.meta && T.meta.model && n > 260) {
+    const Mo = T.meta.model, ctx = metaPrep(b, r._cls, regimeAt);
+    T.hqSigs = metaCands(ctx, n - 120).map((k) => ({ ...k, p: metaProb(Mo, metaFeat(ctx, k)) })).filter((k) => k.p >= Mo.threshold);
+    T.hqSigs.forEach((k) => mk.push({ time: b[k.i].t, position: k.side > 0 ? "belowBar" : "aboveBar", color: k.side > 0 ? "#00ffb3" : "#ff4d6d", shape: k.side > 0 ? "arrowUp" : "arrowDown", text: `★★ HQ ${k.side > 0 ? "BUY" : "SELL"} ${Math.round(k.p * 100)}%` }));
+  }
   T.wy = wy; T.wyVal = VAL;
   if (T.tog.wy) {
     wy.events.forEach((e) => {
@@ -338,6 +344,16 @@ function bestSignal() { // freshest signal with the strongest tested record (ATR
   const recent = cands.filter((c) => n - 1 - c.i <= fresh && c.pf > 1).sort((a, b) => b.pf - a.pf || b.i - a.i);
   const last = cands.sort((a, b) => b.i - a.i)[0];
   return { best: recent[0] || null, last, fresh };
+}
+function hqTermCard() {
+  const Mo = T.meta && T.meta.model, b = T.bars, n = b.length; if (!Mo || T.tf !== "1D") return "";
+  const live = (T.hqSigs || []).filter((k) => n - 1 - k.i <= 5).map((k) => { const e = b[k.i].c, R = Math.abs(e - k.stop), after = b.slice(k.i + 1); return { ...k, e, tgt: e + k.side * Mo.Rm * R, out: k.side > 0 ? after.some((y) => y.l <= k.stop || y.h >= e + Mo.Rm * R) : after.some((y) => y.h >= k.stop || y.l <= e - Mo.Rm * R) }; }).filter((k) => !k.out).sort((a, c) => c.p - a.p);
+  const g = T.meta.byR[Mo.Rm].test.filter((x) => x.n >= 20);
+  const winAt = (p) => { const s = g.filter((x) => x.t <= p + 1e-9); return s.length ? s[s.length - 1].win : null; };
+  if (!live.length) return `<div class="plan sn"><div class="l">★★ High-quality signal (quality model · daily)</div><div class="big">NONE RIGHT NOW</div><p class="note" style="margin:6px 0 0">No signal on this asset passes the quality model (≥ ${Math.round(Mo.threshold * 100)}% confidence). On unseen data the model's picks won ${Math.round(Mo.test.win * 100)}% vs ${Math.round(Mo.testBase.win * 100)}% for all signals.</p></div>`;
+  const x = live[0], w = winAt(x.p), name = x.kind === "TRAIL" ? "Trend flip" : x.kind === "PULLBACK" ? "RSI(2) pullback" : `Wyckoff ${x.kind}`;
+  return `<div class="plan ${x.side > 0 ? "sb2" : "ss2"}"><div class="planhead"><div><div class="l">★★ High-quality signal · daily</div><div class="big">${x.side > 0 ? "BUY" : "SELL"}</div></div><div class="conv"><div class="l">Tested win rate</div><div class="cv">${w != null ? Math.round(w * 100) + "%" : "–"}</div><div style="font:11px var(--mono);color:var(--mute)">confidence ${Math.round(x.p * 100)}%</div></div></div>
+    <div class="pgrid"><div><div class="l">Trigger</div><div class="v" style="font-size:13px">${name}</div><div class="s">${fmtT(b[x.i].t)}</div></div><div><div class="l">Entry</div><div class="v">${fmt.px(x.e)}</div><div class="s">now ${fmt.px(b[n - 1].c)}</div></div><div><div class="l">Stop</div><div class="v down">${fmt.px(x.stop)}</div></div><div><div class="l">Target (${Mo.Rm}R)</div><div class="v up">${fmt.px(x.tgt)}</div></div><div><div class="l">Time limit</div><div class="v" style="font-size:13px">${Mo.H} days</div></div></div></div>`;
 }
 function bestCard() {
   const r = T.r, B = bestSignal(), b = T.bars, x = B.best;
@@ -459,7 +475,7 @@ function side(light) {
   if (T.tab === "signal") {
     if (!r.fc) { B.innerHTML = `<p class="note">No model forecast for this asset.</p>`; return; }
     const p = planNow();
-    B.innerHTML = bestCard() + wyCard() + `<h4>Model trade plan</h4><div class="hzsel" id="hz">${[[5, "1W"], [21, "1M"], [63, "3M"], [126, "6M"]].map(([h, l]) => `<button data-h="${h}" class="${h === T.hz ? "on" : ""}">${l}</button>`).join("")}</div>${planCard(r, p)}
+    B.innerHTML = hqTermCard() + bestCard() + wyCard() + `<h4>Model trade plan</h4><div class="hzsel" id="hz">${[[5, "1W"], [21, "1M"], [63, "3M"], [126, "6M"]].map(([h, l]) => `<button data-h="${h}" class="${h === T.hz ? "on" : ""}">${l}</button>`).join("")}</div>${planCard(r, p)}
       <h4>Key levels (${T.tf})</h4>${(T.LV ? T.LV.res.slice().reverse().map((l, i) => `<div class="alrow"><span>Resistance · ${l.n} touch${l.n > 1 ? "es" : ""}</span><span class="down">${fmt.px(l.p)}</span></div>`).join("") + `<div class="alrow"><span><b>Price</b></span><b>${fmt.px(T.price)}</b></div>` + T.LV.sup.map((l) => `<div class="alrow"><span>Support · ${l.n} touch${l.n > 1 ? "es" : ""}</span><span class="up">${fmt.px(l.p)}</span></div>`).join("") : "")}`;
     B.querySelectorAll("#hz button").forEach((x) => (x.onclick = () => { T.hz = +x.dataset.h; side(); draw(); }));
     return;
@@ -615,6 +631,7 @@ document.addEventListener("fullscreenchange", () => setTimeout(draw, 200));
 async function boot() {
   S.data = await fetchJ("data/screener.json?" + Date.now());
   T.acc = await fetchJ("data/accuracy.json?" + Date.now()).catch(() => null);
+  T.meta = await fetchJ("data/meta.json?" + Date.now()).catch(() => null);
   await loadRegime();
   Object.entries(S.data.classes).forEach(([c, l]) => l.forEach((x) => (x._cls = c)));
   [...$("tTog").children].forEach((x) => x.classList.toggle("on", !!T.tog[x.dataset.k]));
