@@ -1,0 +1,27 @@
+{
+ "started": "2026-11-24T15:26:14.643Z",
+ "signals": [
+  {
+   "id": "NVDA|TRAIL|1|2026-11-23",
+   "sym": "NVDA",
+   "label": "NVDA",
+   "cls": "stocks",
+   "side": 1,
+   "kind": "TRAIL",
+   "name": "Trend flip (ATR 20×3)",
+   "sigDate": "2026-11-23",
+   "logged": "2026-11-24T15:26:14.643Z",
+   "loggedDay": 1795564799,
+   "entry": 152.550003,
+   "stop": 129.54948128760196,
+   "target": 175.55052471239804,
+   "Rm": 1,
+   "p": 0.5781433782193707,
+   "status": "open",
+   "last": 152.550003,
+   "openR": 0,
+   "barsHeld": 0
+  }
+ ],
+ "updated": "2026-11-24T15:26:14.643Z"
+}
