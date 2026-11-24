@@ -16,7 +16,7 @@ for (const f of files) {
   if (b.length < 300) continue;
   (series[tf] ||= {})[sym] = b;
   if (tf === "1H") { // 4H by resampling
-    const o = []; b.forEach((x) => { const k = Math.floor(x.t / 14400) * 14400, L = o[o.length - 1]; if (L && L.t === k) { L.h = Math.max(L.h, x.h); L.l = Math.min(L.l, x.l); L.c = x.c; } else o.push({ ...x, t: k }); });
+    const o = []; b.forEach((x) => { const k = Math.floor(x.t / 14400) * 14400, L = o[o.length - 1]; if (L && L.t === k) { L.h = Math.max(L.h, x.h); L.l = Math.min(L.l, x.l); L.c = x.c; L.v = (L.v || 0) + (x.v || 0); } else o.push({ ...x, t: k }); });
     if (o.length >= 300) (series["4H"] ||= {})[sym] = o;
   }
 }
@@ -139,6 +139,40 @@ function trailRaw(b, g) {
   for (let i = 201; i < N; i++) if (st.dir[i] !== st.dir[i - 1]) { close(i); const d = st.dir[i]; if (g.filt === "none" || (g.filt === "ema200" && ((d === 1 && b[i].c > e200[i]) || (d === -1 && b[i].c < e200[i]))) || (g.filt === "daily" && dd[i] === d)) { pos = d; entry = b[i].c; ei = i; } }
   close(N - 1);
   return seg;
+}
+/* ---------- 4. Wyckoff: confirmation filter for BUY/SELL, and Wyckoff events as stand-alone trades ---------- */
+const LIVE = { "1D": { n: 20, m: 3, filt: "none" }, "4H": { n: 10, m: 5, filt: "ema200" }, "1H": { n: 20, m: 5, filt: "daily" } };
+function trailWy(b, g, wy, thr) {
+  const st = M.stA(b, g.n, g.m), e200 = M.emaA(b.map((x) => x.c), 200), N = b.length, cut = Math.floor(N * 0.6), seg = { tr: [], va: [] };
+  const dd = g.filt === "daily" ? (b._dd ||= dailyDir(b)) : null;
+  let pos = 0, entry = 0, ei = 0;
+  const close = (i) => { if (!pos) return; (ei < cut ? seg.tr : seg.va).push(pos * Math.log(b[i].c / entry)); pos = 0; };
+  for (let i = 201; i < N; i++) if (st.dir[i] !== st.dir[i - 1]) {
+    close(i); const d = st.dir[i];
+    const base = g.filt === "none" || (g.filt === "ema200" && ((d === 1 && b[i].c > e200[i]) || (d === -1 && b[i].c < e200[i]))) || (g.filt === "daily" && dd[i] === d);
+    const wok = !wy || (d === 1 ? wy.bias[i] >= thr : wy.bias[i] <= -thr);
+    if (base && wok) { pos = d; entry = b[i].c; ei = i; }
+  }
+  close(N - 1); return seg;
+}
+const statOf = (a) => { let w = 0, gw = 0, gl = 0, t = 0; a.forEach((x) => { t += x; if (x > 0) { w++; gw += x; } else gl -= x; }); return { n: a.length, win: a.length ? w / a.length : 0, pf: gl ? gw / gl : 0, avg: a.length ? t / a.length : 0 }; };
+for (const [tf, syms] of Object.entries(series)) {
+  const R = report.tf[tf], g = LIVE[tf]; if (!g) continue;
+  const W = {}; for (const [s, b] of Object.entries(syms)) W[s] = M.wyckoff(b);
+  R.wyck = { trail: {}, events: {} };
+  for (const thr of [0, 0.2, 0.4]) {
+    const tr = [], va = [], trB = [], vaB = [];
+    for (const [s, b] of Object.entries(syms)) { const r = trailWy(b, g, W[s], thr); tr.push(...r.tr); va.push(...r.va); }
+    R.wyck.trail["bias>=" + thr] = { train: statOf(tr), valid: statOf(va) };
+  }
+  { const tr = [], va = []; for (const b of Object.values(syms)) { const r = trailWy(b, g, null, 0); tr.push(...r.tr); va.push(...r.va); } R.wyck.trail.base = { train: statOf(tr), valid: statOf(va) }; }
+  for (const H of [10, 20]) for (const [s, b] of Object.entries(syms)) {
+    const N = b.length, cut = Math.floor(N * 0.6);
+    for (const e of W[s].events) { if (e.type === "AR" || e.i + H >= N) continue; const k = e.type + "|" + H; const E = (R.wyck.events[k] ||= { tr: [], va: [] }); (e.i < cut ? E.tr : E.va).push(e.side * Math.log(b[e.i + H].c / b[e.i].c)); }
+  }
+  for (const k of Object.keys(R.wyck.events)) { const E = R.wyck.events[k]; R.wyck.events[k] = { train: statOf(E.tr), valid: statOf(E.va) }; }
+  console.log(tf, "wyckoff trail", JSON.stringify(R.wyck.trail));
+  console.log(tf, "wyckoff events", JSON.stringify(R.wyck.events));
 }
 fs.writeFileSync(OUT, JSON.stringify(report, null, 1));
 console.log("written", OUT);

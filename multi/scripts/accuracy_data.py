@@ -11,10 +11,10 @@ os.makedirs(OUT, exist_ok=True)
 
 
 def dump(df, path):
-    df = df[["Open", "High", "Low", "Close"]].dropna()
+    df = df[["Open", "High", "Low", "Close", "Volume"]].dropna(subset=["Close"])
     idx = df.index.tz_convert("UTC") if df.index.tz is not None else df.index
-    rec = [{"t": int(t.timestamp()), "o": float(o), "h": float(h), "l": float(l), "c": float(c)}
-           for t, o, h, l, c in zip(idx, df.Open, df.High, df.Low, df.Close)]
+    rec = [{"t": int(t.timestamp()), "o": float(o), "h": float(h), "l": float(l), "c": float(c), "v": float(v) if v == v else 0.0}
+           for t, o, h, l, c, v in zip(idx, df.Open, df.High, df.Low, df.Close, df.Volume)]
     json.dump(rec, open(path, "w"))
     return len(rec)
 

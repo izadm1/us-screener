@@ -75,3 +75,58 @@ function levels(b, atr) {
 function regChan(b, n = 120) { const y = b.slice(-n).map((x) => Math.log(x.c)), m = y.length, xm = (m - 1) / 2, ym = y.reduce((s, v) => s + v, 0) / m; let sxy = 0, sxx = 0; y.forEach((v, i) => { sxy += (i - xm) * (v - ym); sxx += (i - xm) ** 2; }); const sl = sxy / sxx, ic = ym - sl * xm; const sd = Math.sqrt(y.reduce((s, v, i) => s + (v - (ic + sl * i)) ** 2, 0) / m); return { m, sl, ic, sd }; }
 function volTf(b) { const r = []; for (let i = Math.max(1, b.length - 200); i < b.length; i++) r.push(Math.log(b[i].c / b[i - 1].c)); let v = null; r.forEach((x) => { v = v == null ? x * x : v + 0.06 * (x * x - v); }); const m = r.reduce((s, x) => s + x, 0) / r.length, rv = r.reduce((s, x) => s + (x - m) ** 2, 0) / Math.max(1, r.length - 1); return Math.sqrt(0.5 * (v || rv) + 0.5 * rv); }
 if (typeof module !== 'undefined') module.exports = { TM, emaA, wild, atrA, rsiA, stA, oscA, solve, multiCycle, swings, levels, regChan, volTf };
+
+/* ---------------- Wyckoff analysis (mechanical approximation, no look-ahead) ----------------
+   Trading ranges are classified by the trend before them (accumulation after a decline, distribution
+   after an advance). Events: SC/BC climaxes, AR, ST, Spring, UT/UTAD, SOS/SOW breakouts, LPS/LPSY
+   retests. Volume is used when the asset has it (stocks, ETFs, crypto); forex uses price/range only.
+   Returns per-bar phase and a bias score in [-1, 1] built only from information available at that bar. */
+function wyckoff(b, o = {}) {
+  const n = b.length, W = o.win || 30, atr = atrA(b, 14);
+  const hasVol = b.filter((x) => x.v > 0).length > 0.8 * n;
+  const sma = (f, i, k) => { let s = 0, c = 0; for (let j = Math.max(0, i - k + 1); j <= i; j++) { s += f(b[j]); c++; } return c ? s / c : 0; };
+  const ev = [], phase = new Array(n).fill("none"), bias = new Array(n).fill(0), rangeAt = new Array(n).fill(null);
+  let mode = "trend", lo = 0, hi = 0, rs = 0, ctx = "neutral", lvl = 0, since = 0, sc = null;
+  const add = (i, type, side) => { ev.push({ i, type, side }); };
+  for (let i = Math.max(W + 60, 80); i < n; i++) {
+    const A = atr[i] || (b[i].h - b[i].l) || 1e-9, va = sma((x) => x.v || 0, i - 1, 20), ra = sma((x) => x.h - x.l, i - 1, 20);
+    const big = (b[i].h - b[i].l) >= 1.8 * ra, volHi = hasVol ? (b[i].v || 0) >= 2 * va : true, volUp = hasVol ? (b[i].v || 0) >= 1.3 * va : (b[i].h - b[i].l) >= 1.2 * ra, volLo = hasVol ? (b[i].v || 0) < va : true;
+    let lo40 = Infinity, hi40 = -Infinity; for (let j = i - 40; j < i; j++) { lo40 = Math.min(lo40, b[j].l); hi40 = Math.max(hi40, b[j].h); }
+    // climaxes
+    if (big && volHi && b[i].l <= lo40 && b[i].c < b[i - 20].c && b[i].c > (b[i].h + b[i].l) / 2 - 0.25 * (b[i].h - b[i].l)) { add(i, "SC", 1); sc = { i, l: b[i].l, v: b[i].v || 0 }; }
+    if (big && volHi && b[i].h >= hi40 && b[i].c > b[i - 20].c && b[i].c < (b[i].h + b[i].l) / 2 + 0.25 * (b[i].h - b[i].l)) add(i, "BC", -1);
+    if (sc && i === sc.i + 10) { let k = sc.i + 1; for (let j = sc.i + 1; j <= i; j++) if (b[j].h > b[k].h) k = j; add(k, "AR", 1); }
+    if (sc && i > sc.i + 10 && i < sc.i + 60 && Math.abs(b[i].l - sc.l) <= A && b[i].c > sc.l && (!hasVol || (b[i].v || 0) < sc.v) && b[i].l <= b[i - 1].l) { add(i, "ST", 1); sc = null; }
+    if (mode === "trend") {
+      let l = Infinity, h = -Infinity; for (let j = i - W + 1; j <= i; j++) { l = Math.min(l, b[j].l); h = Math.max(h, b[j].h); }
+      if (h - l <= 7 * A && Math.abs(b[i].c - b[i - W + 1].c) <= 2.5 * A) {
+        mode = "range"; lo = l; hi = h; rs = i - W + 1;
+        const pre = b[rs].c - b[Math.max(0, rs - 60)].c;
+        ctx = pre < -3 * A ? "acc" : pre > 3 * A ? "dist" : "neutral";
+      }
+    } else if (mode === "range") {
+      if (b[i].l < lo - 0.1 * A && b[i].l > lo - 1.5 * A && b[i].c >= lo) add(i, "Spring", 1);
+      else if (b[i].h > hi + 0.1 * A && b[i].h < hi + 1.5 * A && b[i].c <= hi) add(i, ctx === "dist" ? "UTAD" : "UT", -1);
+      if (b[i].c > hi + 0.25 * A) { if (volUp) add(i, "SOS", 1); mode = "markup"; lvl = hi; since = i; }
+      else if (b[i].c < lo - 0.25 * A) { if (volUp) add(i, "SOW", -1); mode = "markdown"; lvl = lo; since = i; }
+      else if (i - rs > 150) mode = "trend";
+    } else if (mode === "markup") {
+      const last = ev.length ? ev[ev.length - 1] : null;
+      if (b[i].l <= lvl + 1.5 * A && b[i].l >= lvl - A && b[i].c > lvl && b[i].c > b[i].o && volLo && b[i].l < b[i - 1].l && !(last && last.type === "LPS" && i - last.i < 10)) add(i, "LPS", 1);
+      if (b[i].c < lvl - A || i - since > 120) mode = "trend";
+    } else if (mode === "markdown") {
+      const last = ev.length ? ev[ev.length - 1] : null;
+      if (b[i].h >= lvl - 1.5 * A && b[i].h <= lvl + A && b[i].c < lvl && b[i].c < b[i].o && volLo && b[i].h > b[i - 1].h && !(last && last.type === "LPSY" && i - last.i < 10)) add(i, "LPSY", -1);
+      if (b[i].c > lvl + A || i - since > 120) mode = "trend";
+    }
+    phase[i] = mode === "range" ? (ctx === "acc" ? "accumulation" : ctx === "dist" ? "distribution" : "range") : mode === "markup" ? "markup" : mode === "markdown" ? "markdown" : "none";
+    if (mode === "range") rangeAt[i] = { lo, hi, start: rs, ctx };
+    let s = { markup: 0.6, markdown: -0.6, accumulation: 0.2, distribution: -0.2 }[phase[i]] || 0;
+    const W8 = { Spring: 0.6, SOS: 0.6, LPS: 0.5, ST: 0.3, SC: 0.2, UTAD: -0.6, UT: -0.5, SOW: -0.6, LPSY: -0.5, BC: -0.2 };
+    for (let k = ev.length - 1; k >= 0 && i - ev[k].i <= 15; k--) if (ev[k].type !== "AR" && ev[k].i <= i) s += W8[ev[k].type] || 0;
+    bias[i] = Math.max(-1, Math.min(1, s));
+  }
+  ev.sort((a, c) => a.i - c.i);
+  return { events: ev, phase, bias, rangeAt, hasVol };
+}
+if (typeof module !== 'undefined') module.exports.wyckoff = wyckoff;
