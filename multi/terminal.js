@@ -221,17 +221,28 @@ function draw() {
     leg.push(["#5b8cff", "σ corridor (regression ±1σ, ±2σ, projected)"]);
   }
   const ft = [last.t].concat(fut);
+  // display wave: model drift + the combined cycle, scaled so its swings reach the edge of the likely range
+  const hd = (k) => k * dayPerBar * (r.fc && r.fc.calendar && T.tf === "1W" ? 7 / 5 : 1);
+  const drift = (k) => { if (!daily || !k) return 0; const md = model(r.fc, hd(k)); return md.mz * md.s; };
+  const halfW = (k) => { if (!k) return 0; if (daily) { const md = model(r.fc, hd(k)); return (md.q[9] - md.q[5]) / 2 * md.s; } return 0.674 * sigTf * Math.sqrt(k); };
+  let cM = 1e-12; if (cyc) for (let j = 1; j <= F; j++) cM = Math.max(cM, Math.abs(cyc.at(j) - cyc.at(0)));
+  const coneAt = (k, i) => { if (!k) return price; if (daily) { const md = model(r.fc, hd(k)); return price * Math.exp(drift(k) + md.q[i] * md.s); } return price * Math.exp(NORM_Q[i] * sigTf * Math.sqrt(k)); };
+  const waveAt = (k) => (!k ? price : price * Math.exp(drift(k) + (cyc ? 1.3 * halfW(k) * (cyc.at(k) - cyc.at(0)) / cM : 0)));
   if (T.tog.fvol) {
-    [[0, 14, "rgba(155,123,255,.45)", 1], [3, 11, "rgba(91,140,255,.9)", 1], [5, 9, "rgba(91,140,255,.6)", 2]].forEach(([lo, hi, col, sty]) => {
-      const ex = lo === 5 ? {} : noScale; // keep the price scale on the candles + likely range
-      line(ft.map((t, k) => ({ time: t, value: k ? band(k, hi) : price })), col, 1, sty === 1 ? 3 : 2, ex);
-      line(ft.map((t, k) => ({ time: t, value: k ? band(k, lo) : price })), col, 1, sty === 1 ? 3 : 2, ex);
+    // shaded cone between the 80% edges
+    const up = ch.addAreaSeries({ lineColor: "rgba(0,0,0,0)", topColor: "rgba(91,140,255,.13)", bottomColor: "rgba(91,140,255,.13)", priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, ...noScale });
+    up.setData(ft.map((t, k) => ({ time: t, value: coneAt(k, 11) })));
+    const dn = ch.addAreaSeries({ lineColor: "rgba(0,0,0,0)", topColor: "#0b0e13", bottomColor: "#0b0e13", priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, ...noScale });
+    dn.setData(ft.map((t, k) => ({ time: t, value: coneAt(k, 3) })));
+    [[3, 11, "#5fb8ff", 2, 1, noScale], [5, 9, "rgba(91,140,255,.35)", 1, 2, {}]].forEach(([lo, hi, col, w, sty, ex]) => {
+      line(ft.map((t, k) => ({ time: t, value: coneAt(k, hi) })), col, w, sty, ex);
+      line(ft.map((t, k) => ({ time: t, value: coneAt(k, lo) })), col, w, sty, ex);
     });
-    leg.push(["#5b8cff", daily ? "Forecast vol — model ranges 50% · 80% · 98%" : "Forecast vol — ±σ cone from recent volatility"]);
+    leg.push(["#5fb8ff", daily ? "Forecast vol — shaded 80% range (dotted), 50% (dashed)" : "Forecast vol — shaded ±σ cone from recent volatility"]);
   }
   let fcS = null, futMarks = []; T.allTurns = []; T.turnStats = null;
   if (T.tog.fc) {
-    fcS = line(ft.map((t, k) => ({ time: t, value: price * Math.exp(path(k)) })), "#f2b33d", 2, 2);
+    fcS = line(ft.map((t, k) => ({ time: t, value: waveAt(k) })), "#f2b33d", 2, 2);
     leg.push(["#f2b33d", useCyc ? (daily ? "Forecast — model + high-probability cycle" : "Forecast — high-probability cycle") : daily ? "Forecast — model centre (no cycle passed the probability test)" : "Forecast — centre (no cycle passed the probability test)"]);
     T.allTurns = allTurns; T.turnStats = tStats;
     if (useCyc && T.tog.turns) {
@@ -295,7 +306,7 @@ function draw() {
   if (fcS && futMarks.length) {
     el.style.position = "relative";
     const ov = document.createElement("div"); ov.className = "turnlab"; el.appendChild(ov);
-    const labs = futMarks.map((m) => { const d = document.createElement("span"); d.className = (m.type === "high" ? "th" : "tl") + (m.edge < 0.05 || m.n < 6 ? " weak" : ""); d.textContent = `${fmtT(fut[m.k - 1])} · ${Math.round(m.prob * 100)}%`; ov.appendChild(d); return { m, d, t: fut[m.k - 1], p: price * Math.exp(path(m.k)) }; });
+    const labs = futMarks.map((m) => { const d = document.createElement("span"); d.className = m.type === "high" ? "th" : "tl"; d.textContent = fmtT(fut[m.k - 1]); d.title = `${m.type === "high" ? "Projected high" : "Projected low"} · tested probability ${Math.round(m.prob * 100)}% (chance ${Math.round(tStats.base * 100)}%)`; ov.appendChild(d); return { m, d, t: fut[m.k - 1], p: waveAt(m.k) }; });
     const place = () => labs.forEach(({ m, d, t, p }) => { const x = ch.timeScale().timeToCoordinate(t), y = fcS.priceToCoordinate(p); if (x == null || y == null || x < 0 || x > el.clientWidth - 90) { d.style.display = "none"; return; } d.style.display = ""; d.style.left = x + "px"; d.style.top = (m.type === "high" ? y - 24 : y + 8) + "px"; });
     ch.timeScale().subscribeVisibleLogicalRangeChange(() => requestAnimationFrame(place));
     ch.subscribeCrosshairMove(() => {}); setTimeout(place, 60); setTimeout(place, 300);
@@ -308,8 +319,8 @@ function draw() {
     nb.innerHTML = `No turning date reaches ${Math.round((T.minProb || 0) * 100)}% probability on ${T.tf} (best ${Math.round(best * 100)}%, chance ${Math.round((tStats ? tStats.base : 0) * 100)}%).<br>Showing the tested forecast only: centre line + calibrated ranges.`;
     el.appendChild(nb);
   }
-  T.cyc = cyc; T.futMarks = futMarks; T.LV = LV; T.path = path; T.band = band; T.price = price;
-  $("tNote").innerHTML = (cyc ? `Showing ${futMarks.length} of ${(T.allTurns || []).length} projected turns${T.minProb ? ` (≥ ${Math.round(T.minProb * 100)}% probability)` : " (all · faded = no better than chance)"} · cycles ≈ ${cyc.periods.join(" / ")} bars · fit ${(cyc.strength * 100).toFixed(0)}%` : "No cycle detected") +
+  T.cyc = cyc; T.futMarks = futMarks; T.LV = LV; T.path = (k) => Math.log(waveAt(k) / price); T.band = (k, i) => coneAt(k, i); T.price = price;
+  $("tNote").innerHTML = (cyc ? `Showing ${futMarks.length} of ${(T.allTurns || []).length} projected turns${T.minProb ? ` (≥ ${Math.round(T.minProb * 100)}% probability)` : " (all milestones · hover a date for its tested probability)"} · cycles ≈ ${cyc.periods.join(" / ")} bars · fit ${(cyc.strength * 100).toFixed(0)}%` : "No cycle detected") +
     (daily ? " · Forecast centre and ranges from the validated daily model" : ` · ${T.tf} forecast uses this timeframe's cycle and volatility (no directional model intraday)`) + ` · ${n} bars`;
   T.lastFull = Date.now();
   if (T.tab === "fc" || T.tab === "signal") side();
