@@ -87,7 +87,12 @@ function trailTest(b, n, m, filt) {
 /* ---------- run ---------- */
 const report = { generated: new Date().toISOString(), tf: {} };
 const TURN_GRID = []; for (const nCyc of [1, 2, 3]) for (const win of [150, 300, 500]) TURN_GRID.push({ nCyc, win, pmin: 8, pmaxCap: 120, sep: 1.3 });
-const TRAIL_GRID = []; for (const n of [7, 10, 14, 20]) for (const m of [2, 2.5, 3, 3.5, 4]) for (const filt of ["none", "ema200"]) TRAIL_GRID.push({ n, m, filt });
+const trailGrid = (tf) => { const g = []; for (const n of [7, 10, 14, 20, 30]) for (const m of [2, 2.5, 3, 3.5, 4, 5]) for (const filt of tf === "1D" ? ["none", "ema200"] : ["none", "ema200", "daily"]) g.push({ n, m, filt }); return g; };
+function dailyDir(b) { // daily ATR-trail direction of the previous completed UTC day, mapped onto each intraday bar (no look-ahead)
+  const days = []; b.forEach((x) => { const k = Math.floor(x.t / 86400), L = days[days.length - 1]; if (L && L.k === k) { L.h = Math.max(L.h, x.h); L.l = Math.min(L.l, x.l); L.c = x.c; } else days.push({ k, o: x.o, h: x.h, l: x.l, c: x.c }); });
+  const st = M.stA(days, 10, 3), idx = {}; days.forEach((d, i) => (idx[d.k] = i));
+  return b.map((x) => { const i = idx[Math.floor(x.t / 86400)]; return i > 0 ? st.dir[i - 1] : 0; });
+}
 
 for (const [tf, syms] of Object.entries(series)) {
   const R = (report.tf[tf] = { symbols: Object.keys(syms).length, turns: [], cone: null, trail: [] });
@@ -111,7 +116,7 @@ for (const [tf, syms] of Object.entries(series)) {
   R.cone = { 5: { c50: cone[5][0] / cone[5][2], c80: cone[5][1] / cone[5][2] }, 20: { c50: cone[20][0] / cone[20][2], c80: cone[20][1] / cone[20][2] } };
   console.log(tf, "cone", JSON.stringify(R.cone));
   // trail
-  for (const g of TRAIL_GRID) {
+  for (const g of trailGrid(tf)) {
     const all = { tr: [], va: [] }, agg = { tr: { n: 0, w: 0, gw: 0, gl: 0, tot: 0 }, va: { n: 0, w: 0, gw: 0, gl: 0, tot: 0 } };
     // recompute pf properly
     let tr = { n: 0, w: 0, gw: 0, gl: 0, tot: 0 }, va = { n: 0, w: 0, gw: 0, gl: 0, tot: 0 };
@@ -120,15 +125,17 @@ for (const [tf, syms] of Object.entries(series)) {
     R.trail.push({ cfg: g, train: f(tr), valid: f(va) });
   }
   R.trail.sort((a, b) => b.train.pf - a.train.pf);
+  R.byFilter = {}; for (const f of ["none", "ema200", "daily"]) { const x = R.trail.filter((t) => t.cfg.filt === f); if (x.length) R.byFilter[f] = x[0]; }
   R.bestTrail = R.trail[0];
   R.currentTrail = R.trail.find((x) => x.cfg.n === 10 && x.cfg.m === 3 && x.cfg.filt === "none");
   console.log(tf, "best trail", JSON.stringify(R.bestTrail), "current", JSON.stringify(R.currentTrail));
 }
 function trailRaw(b, g) {
   const st = M.stA(b, g.n, g.m), e200 = M.emaA(b.map((x) => x.c), 200), N = b.length, cut = Math.floor(N * 0.6), seg = { tr: [], va: [] };
+  const dd = g.filt === "daily" ? (b._dd ||= dailyDir(b)) : null;
   let pos = 0, entry = 0, ei = 0;
   const close = (i) => { if (!pos) return; (ei < cut ? seg.tr : seg.va).push(pos * Math.log(b[i].c / entry)); pos = 0; };
-  for (let i = 201; i < N; i++) if (st.dir[i] !== st.dir[i - 1]) { close(i); const d = st.dir[i]; if (g.filt === "none" || (d === 1 && b[i].c > e200[i]) || (d === -1 && b[i].c < e200[i])) { pos = d; entry = b[i].c; ei = i; } }
+  for (let i = 201; i < N; i++) if (st.dir[i] !== st.dir[i - 1]) { close(i); const d = st.dir[i]; if (g.filt === "none" || (g.filt === "ema200" && ((d === 1 && b[i].c > e200[i]) || (d === -1 && b[i].c < e200[i]))) || (g.filt === "daily" && dd[i] === d)) { pos = d; entry = b[i].c; ei = i; } }
   close(N - 1);
   return seg;
 }
