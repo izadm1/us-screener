@@ -174,5 +174,74 @@ for (const [tf, syms] of Object.entries(series)) {
   console.log(tf, "wyckoff trail", JSON.stringify(R.wyck.trail));
   console.log(tf, "wyckoff events", JSON.stringify(R.wyck.events));
 }
+/* ---------- 5. Improvement round: filters, exits and pullback entries on top of the live BUY/SELL ---------- */
+const dKey = (t) => Math.floor(t / 86400);
+function regimeMap(b) { const e = M.emaA(b.map((x) => x.c), 200), m = {}; b.forEach((x, i) => { if (e[i] != null) m[dKey(x.t) + 1] = x.c > e[i] ? 1 : -1; }); return m; }
+const REG = { equity: series["1D"] && series["1D"]["SPY"] ? regimeMap(series["1D"]["SPY"]) : {}, crypto: series["1D"] && series["1D"]["BTC-USD"] ? regimeMap(series["1D"]["BTC-USD"]) : {} };
+const regAt = (c, t) => { const m = REG[c]; if (!m) return 0; for (let k = 0; k < 6; k++) { const v = m[dKey(t) - k]; if (v) return v; } return 0; };
+function htfDir(b, tf) { // previous completed higher-timeframe bar's trail direction (1D→weekly, 4H/1H→daily)
+  const key = tf === "1D" ? (t) => { const d = new Date(t * 1000), dow = (d.getUTCDay() + 6) % 7; return dKey(t) - dow; } : (t) => dKey(t);
+  const H = []; b.forEach((x) => { const k = key(x.t), L = H[H.length - 1]; if (L && L.k === k) { L.h = Math.max(L.h, x.h); L.l = Math.min(L.l, x.l); L.c = x.c; } else H.push({ k, o: x.o, h: x.h, l: x.l, c: x.c }); });
+  const st = M.stA(H, 10, 3), idx = {}; H.forEach((h, i) => (idx[h.k] = i));
+  return b.map((x) => { const i = idx[key(x.t)]; return i > 0 ? st.dir[i - 1] : 0; });
+}
+function simulate(b, sym, tf, v) {
+  const g = LIVE[tf], c = cls(sym), N = b.length, cut = Math.floor(N * 0.6);
+  const st = M.stA(b, g.n, g.m), e200 = M.emaA(b.map((x) => x.c), 200), dd = g.filt === "daily" ? (b._dd ||= dailyDir(b)) : null;
+  const adx = v.adx ? (b._adx ||= M.adxA(b, 14)) : null, er = v.er ? (b._er ||= M.erA(b, 20)) : null;
+  const hd = v.htf ? (b["_htf" + tf] ||= htfDir(b, tf)) : null, r2 = v.pull ? (b._r2 ||= M.rsiA(b, 2)) : null;
+  const vAvg = (i) => { let s0 = 0; for (let j = i - 20; j < i; j++) s0 += b[j].v || 0; return s0 / 20; };
+  const ok = (i, d) => {
+    if (!(g.filt === "none" || (g.filt === "ema200" && ((d === 1 && b[i].c > e200[i]) || (d === -1 && b[i].c < e200[i]))) || (g.filt === "daily" && dd[i] === d))) return false;
+    if (v.adx && !(adx[i] >= v.adx)) return false;
+    if (v.er && !(er[i] >= v.er)) return false;
+    if (v.regime && c !== "fx" && regAt(c, b[i].t) !== d) return false;
+    if (v.htf && hd[i] !== d) return false;
+    if (v.session && c === "fx" && tf !== "1D") { const h = new Date(b[i].t * 1000).getUTCHours(); if (h < 7 || h > 20) return false; }
+    if (v.vol && c !== "fx" && !((b[i].v || 0) >= 1.2 * vAvg(i))) return false;
+    return true;
+  };
+  const out = { tr: [], va: [] };
+  const push = (i, r) => (i < cut ? out.tr : out.va).push(r);
+  let busyUntil = 0;
+  for (let i = 201; i < N - 1; i++) {
+    if (i <= busyUntil) continue;
+    let d = 0, kind = "";
+    if (!v.pull && st.dir[i] !== st.dir[i - 1]) { d = st.dir[i]; kind = "trail"; }
+    if (v.pull && st.dir[i] === st.dir[i - 1] && r2[i] != null) { const dd0 = st.dir[i]; if ((dd0 === 1 && r2[i] < 10) || (dd0 === -1 && r2[i] > 90)) { d = dd0; kind = "pull"; } }
+    if (!d || !ok(i, d)) continue;
+    const entry = b[i].c, stop0 = st.stop[i]; const R = Math.abs(entry - stop0) / entry;
+    let half = false, j = i + 1, ret = null;
+    for (; j < N; j++) {
+      const x = b[j];
+      if (kind === "pull") { if ((d === 1 && r2[j] > 70) || (d === -1 && r2[j] < 30) || st.dir[j] !== d || j - i >= 10) { ret = d * (x.c / entry - 1); break; } continue; }
+      if (v.exit === "half1R" && R > 0) {
+        if (half && (d === 1 ? x.l <= entry : x.h >= entry)) { ret = 0.5 * R; break; }
+        if (!half && (d === 1 ? x.h >= entry * (1 + R) : x.l <= entry * (1 - R))) half = true;
+      }
+      if (st.dir[j] !== d) { const rem = d * (x.c / entry - 1); ret = half ? 0.5 * R + 0.5 * rem : rem; break; }
+    }
+    if (ret == null) { const rem = d * (b[N - 1].c / entry - 1); ret = half ? 0.5 * R + 0.5 * rem : rem; j = N - 1; }
+    push(i, ret); busyUntil = j - 1;
+  }
+  return out;
+}
+const VARIANTS = { base: {}, adx20: { adx: 20 }, adx25: { adx: 25 }, er30: { er: 0.3 }, er40: { er: 0.4 }, regime: { regime: true }, htf: { htf: true }, session: { session: true }, volume: { vol: true }, half1R: { exit: "half1R" }, pullback: { pull: true }, pullbackRegime: { pull: true, regime: true }, pullbackHtf: { pull: true, htf: true } };
+const runV = (syms, tf, v) => { const tr = [], va = []; for (const [s, b] of Object.entries(syms)) { const r = simulate(b, s, tf, v); tr.push(...r.tr); va.push(...r.va); } return { train: statOf(tr), valid: statOf(va) }; };
+for (const [tf, syms] of Object.entries(series)) {
+  if (!LIVE[tf]) continue;
+  const R = report.tf[tf]; R.improve = {};
+  for (const [k, v] of Object.entries(VARIANTS)) R.improve[k] = { v, ...runV(syms, tf, v) };
+  const base = R.improve.base, better = (x) => x.train.pf > base.train.pf && x.valid.pf > base.valid.pf && x.train.win >= base.train.win - 0.005 && x.valid.win >= base.valid.win - 0.005 && x.valid.n >= 80;
+  const filt = ["adx20", "adx25", "er30", "er40", "regime", "htf", "session", "volume"].filter((k) => better(R.improve[k]));
+  // combine the winning filters (one ADX/ER threshold max), with and without the half-at-1R exit
+  const pick = filt.filter((k) => !(k === "adx20" && filt.includes("adx25") && R.improve.adx25.valid.pf >= R.improve.adx20.valid.pf) && !(k === "adx25" && filt.includes("adx20") && R.improve.adx20.valid.pf > R.improve.adx25.valid.pf) && !(k === "er30" && filt.includes("er40") && R.improve.er40.valid.pf >= R.improve.er30.valid.pf) && !(k === "er40" && filt.includes("er30") && R.improve.er30.valid.pf > R.improve.er40.valid.pf));
+  const combo = Object.assign({}, ...pick.map((k) => VARIANTS[k]));
+  R.improve.combo = { v: combo, picked: pick, ...runV(syms, tf, combo) };
+  R.improve.comboHalf = { v: { ...combo, exit: "half1R" }, picked: pick, ...runV(syms, tf, { ...combo, exit: "half1R" }) };
+  const pbBest = ["pullback", "pullbackRegime", "pullbackHtf"].map((k) => [k, R.improve[k]]).sort((a, b) => b[1].train.pf - a[1].train.pf)[0];
+  R.improve.pullbackPick = { name: pbBest[0], ...pbBest[1] };
+  for (const [k, x] of Object.entries(R.improve)) console.log(tf, "improve", k.padEnd(15), "train pf %s win %s n %s | valid pf %s win %s n %s".replace(/%s/g, () => "") , x.train.pf.toFixed(2), x.train.win.toFixed(2), x.train.n, "|", x.valid.pf.toFixed(2), x.valid.win.toFixed(2), x.valid.n, x.picked ? x.picked.join("+") : "");
+}
 fs.writeFileSync(OUT, JSON.stringify(report, null, 1));
 console.log("written", OUT);

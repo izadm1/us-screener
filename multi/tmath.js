@@ -129,4 +129,14 @@ function wyckoff(b, o = {}) {
   ev.sort((a, c) => a.i - c.i);
   return { events: ev, phase, bias, rangeAt, hasVol };
 }
+/* ADX (trend strength) and Kaufman efficiency ratio (0 = pure chop, 1 = straight line) */
+function adxA(b, n = 14) {
+  const pdm = [null], mdm = [null];
+  for (let i = 1; i < b.length; i++) { const up = b[i].h - b[i - 1].h, dn = b[i - 1].l - b[i].l; pdm.push(up > dn && up > 0 ? up : 0); mdm.push(dn > up && dn > 0 ? dn : 0); }
+  const a = atrA(b, n), sp = wild(pdm, n), sm = wild(mdm, n);
+  const dx = sp.map((v, i) => { if (v == null || !a[i]) return null; const p = 100 * v / a[i], m = 100 * sm[i] / a[i]; return p + m ? 100 * Math.abs(p - m) / (p + m) : 0; });
+  return wild(dx, n);
+}
+function erA(b, n = 20) { return b.map((x, i) => { if (i < n) return null; let path = 0; for (let j = i - n + 1; j <= i; j++) path += Math.abs(b[j].c - b[j - 1].c); return path ? Math.abs(x.c - b[i - n].c) / path : 0; }); }
 if (typeof module !== 'undefined') module.exports.wyckoff = wyckoff;
+if (typeof module !== 'undefined') { module.exports.adxA = adxA; module.exports.erA = erA; }
