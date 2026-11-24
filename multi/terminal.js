@@ -241,17 +241,10 @@ function draw() {
   }
   // candle markers: signals + past turns
   const mk = [];
-  if (T.tog.sig) {
+  if (T.tog.sig) { // entry signals only: BUY when the ATR trail flips up, SELL when it flips down
     for (let i = 1; i < n; i++) {
-      if (st.dir[i] !== st.dir[i - 1] && st.stop[i - 1] != null) mk.push({ time: b[i].t, position: st.dir[i] === 1 ? "belowBar" : "aboveBar", color: st.dir[i] === 1 ? "#22c38e" : "#f0565b", shape: st.dir[i] === 1 ? "arrowUp" : "arrowDown", text: "TREND" });
-      if (osc[i - 1] != null && osc[i] != null) {
-        if (osc[i - 1] < -2 && osc[i] >= -2) mk.push({ time: b[i].t, position: "belowBar", color: "#22c38e", shape: "circle", text: "SETUP" });
-        if (osc[i - 1] > 2 && osc[i] <= 2) mk.push({ time: b[i].t, position: "aboveBar", color: "#f0565b", shape: "circle", text: "SETUP" });
-      }
+      if (st.dir[i] !== st.dir[i - 1] && st.stop[i - 1] != null) mk.push({ time: b[i].t, position: st.dir[i] === 1 ? "belowBar" : "aboveBar", color: st.dir[i] === 1 ? "#22c38e" : "#f0565b", shape: st.dir[i] === 1 ? "arrowUp" : "arrowDown", text: st.dir[i] === 1 ? "BUY" : "SELL" });
     }
-    const { hi, lo } = swings(b, 3);
-    for (let j = 1; j < lo.length; j++) { const a = lo[j - 1], c = lo[j]; if (c - a < 60 && b[c].l < b[a].l && rsi[c] > rsi[a]) mk.push({ time: b[c].t, position: "belowBar", color: "#22c38e", shape: "square", text: "DIV" }); }
-    for (let j = 1; j < hi.length; j++) { const a = hi[j - 1], c = hi[j]; if (c - a < 60 && b[c].h > b[a].h && rsi[c] < rsi[a]) mk.push({ time: b[c].t, position: "aboveBar", color: "#f0565b", shape: "square", text: "DIV" }); }
   }
   if (T.tog.turns && useCyc) {
     for (let k = -Math.min(cyc.m - 2, n - 2); k < 0; k++) { const a = cyc.at(k - 1), c = cyc.at(k), d = cyc.at(k + 1), i = n - 1 + k; if (i < 1) continue; if (c > a && c >= d) mk.push({ time: b[i].t, position: "aboveBar", color: "rgba(240,86,91,.6)", shape: "circle", size: 0.5 }); if (c < a && c <= d) mk.push({ time: b[i].t, position: "belowBar", color: "rgba(34,195,142,.6)", shape: "circle", size: 0.5 }); }
@@ -283,7 +276,6 @@ function draw() {
       const pp = oc.addLineSeries({ color: "rgba(242,179,61,.75)", lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
       pp.setData([{ time: last.t, value: osc[n - 1] }].concat(fut.map((t, k) => ({ time: t, value: osc[n - 1] + (at(m - 1 + k + 1) - at(m - 1)) * Math.exp(-(k + 1) / (6 * P)) }))));
     }
-    if (T.tog.sig) { const om = []; const { hi, lo } = swings(b, 3); for (let j = 1; j < lo.length; j++) { const a = lo[j - 1], c = lo[j]; if (c - a < 60 && b[c].l < b[a].l && osc[c] > osc[a]) om.push({ time: b[c].t, position: "belowBar", color: "#22c38e", shape: "arrowUp", text: "DIV" }); } for (let j = 1; j < hi.length; j++) { const a = hi[j - 1], c = hi[j]; if (c - a < 60 && b[c].h > b[a].h && osc[c] < osc[a]) om.push({ time: b[c].t, position: "aboveBar", color: "#f0565b", shape: "arrowDown", text: "DIV" }); } om.sort((x, y) => x.time - y.time); os.setMarkers(om); }
     T.s.os = os;
   }
   // sync + range
