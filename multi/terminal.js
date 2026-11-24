@@ -81,6 +81,37 @@ function multiCycle(vals, nCyc = 3) { // superposition of the strongest cycles (
   const amps = W.map((_, i) => Math.hypot(beta[1 + 2 * i], beta[2 + 2 * i]));
   return { P: P[0], periods: P, amps, strength: Math.max(0, 1 - sse / (sst || 1e-12)), m: n, at: (k) => at(n - 1 + k), fitAt: at, amp: amps[0] };
 }
+/* Turn reliability: walk-forward replay of the cycle projection on this asset/timeframe's own history.
+   A projected high (low) counts as a hit if a major swing high (low) actually formed within ±tol bars.
+   Base rate = chance a random bar has such a swing within ±tol — a turn must beat luck to be shown. */
+const TURN_CACHE = {};
+function turnStats(b, periods) {
+  const n = b.length, key = `${T.r.sym}|${T.tf}|${n}|${periods.join(",")}`;
+  if (TURN_CACHE[key]) return TURN_CACHE[key];
+  const lc = b.map((x) => Math.log(x.c));
+  const Pmin = Math.min(...periods), K = Math.max(3, Math.round(Pmin / 4)), tol = Math.max(2, Math.round(Pmin / 8)), H = Math.min(120, Math.round(1.5 * Math.max(...periods)));
+  const hi = new Array(n).fill(false), lo = new Array(n).fill(false);
+  for (let i = K; i < n - K; i++) { let H1 = true, L1 = true; for (let j = i - K; j <= i + K; j++) { if (b[j].h > b[i].h) H1 = false; if (b[j].l < b[i].l) L1 = false; } hi[i] = H1; lo[i] = L1; }
+  const near = (arr, t0) => { for (let j = Math.max(0, t0 - tol); j <= Math.min(n - 1, t0 + tol); j++) if (arr[j]) return true; return false; };
+  let bh = 0, bl = 0, bn = 0; for (let i = K; i < n - K; i++) { bn++; if (near(hi, i)) bh++; if (near(lo, i)) bl++; }
+  const base = bn ? (bh + bl) / (2 * bn) : 0.5;
+  const rank = [0, 1, 2, 3].map(() => ({ h: 0, n: 0 }));
+  const start = Math.max(150, n - 300), lastOk = n - 1 - K - tol;
+  for (let o = start; o < lastOk - 5; o += 4) {
+    const c = multiCycle(lc.slice(0, o + 1)); if (!c) continue;
+    const p = []; for (let k = 0; k <= H + 1; k++) p.push(c.at(k));
+    let r = 0;
+    for (let k = 1; k <= H && r < 4; k++) {
+      const isH = p[k] > p[k - 1] && p[k] >= p[k + 1], isL = p[k] < p[k - 1] && p[k] <= p[k + 1];
+      if (!isH && !isL) continue;
+      const t0 = o + k; if (t0 + tol > lastOk) break;
+      rank[r].n++; if (near(isH ? hi : lo, t0)) rank[r].h++; r++;
+    }
+  }
+  const res = { base, tol, K, rank: rank.map((x) => ({ p: (x.h + 1) / (x.n + 2), n: x.n })), tests: rank[0].n };
+  TURN_CACHE[key] = res; return res;
+}
+T.minProb = LS.get("term_minprob", 0.65);
 const cycAt = (c, k) => c.amp * Math.sin(c.phase + 2 * Math.PI * k / c.P); // k = bars from last (negative = past)
 function swings(b, k = 3) { const hi = [], lo = []; for (let i = k; i < b.length - k; i++) { let H = true, L = true; for (let j = i - k; j <= i + k; j++) { if (b[j].h > b[i].h) H = false; if (b[j].l < b[i].l) L = false; } if (H) hi.push(i); if (L) lo.push(i); } return { hi, lo }; }
 function levels(b, atr) {
@@ -191,12 +222,17 @@ function draw() {
     });
     leg.push(["#5b8cff", daily ? "Forecast vol — model ranges 50% · 80% · 98%" : "Forecast vol — ±σ cone from recent volatility"]);
   }
-  let fcS = null, futMarks = [];
+  let fcS = null, futMarks = []; T.allTurns = []; T.turnStats = null;
   if (T.tog.fc) {
     fcS = line(ft.map((t, k) => ({ time: t, value: price * Math.exp(path(k)) })), "#f2b33d", 2, 2);
     leg.push(["#f2b33d", daily ? "Forecast — model drift + cycle" : "Forecast — projected cycle"]);
     if (useCyc && T.tog.turns) {
-      for (let k = 1; k < F - 1; k++) { const a = path(k - 1), c = path(k), d = path(k + 1); if (c > a && c >= d) futMarks.push({ k, type: "high" }); if (c < a && c <= d) futMarks.push({ k, type: "low" }); }
+      const all = [];
+      for (let k = 1; k < F - 1; k++) { const a = cyc.at(k - 1), c = cyc.at(k), d = cyc.at(k + 1); if (c > a && c >= d) all.push({ k, type: "high" }); if (c < a && c <= d) all.push({ k, type: "low" }); }
+      const ts = turnStats(b, cyc.periods);
+      all.forEach((m, i) => { const rk = ts.rank[Math.min(i, 3)]; m.prob = rk.p; m.n = rk.n; m.edge = rk.p - ts.base; m.rank = i + 1; });
+      T.allTurns = all; T.turnStats = ts;
+      futMarks = all.filter((m) => m.n >= 6 && m.prob >= T.minProb && m.edge >= 0.08);
       fcS.setMarkers(futMarks.map((m) => ({ time: fut[m.k - 1], position: m.type === "high" ? "aboveBar" : "belowBar", color: m.type === "high" ? "#f0565b" : "#22c38e", shape: "circle", size: 0.6 })));
     }
   }
@@ -264,18 +300,19 @@ function draw() {
   if (fcS && futMarks.length) {
     el.style.position = "relative";
     const ov = document.createElement("div"); ov.className = "turnlab"; el.appendChild(ov);
-    const labs = futMarks.map((m) => { const d = document.createElement("span"); d.className = m.type === "high" ? "th" : "tl"; d.textContent = fmtT(fut[m.k - 1]); ov.appendChild(d); return { m, d, t: fut[m.k - 1], p: price * Math.exp(path(m.k)) }; });
+    const labs = futMarks.map((m) => { const d = document.createElement("span"); d.className = m.type === "high" ? "th" : "tl"; d.textContent = `${fmtT(fut[m.k - 1])} · ${Math.round(m.prob * 100)}%`; ov.appendChild(d); return { m, d, t: fut[m.k - 1], p: price * Math.exp(path(m.k)) }; });
     const place = () => labs.forEach(({ m, d, t, p }) => { const x = ch.timeScale().timeToCoordinate(t), y = fcS.priceToCoordinate(p); if (x == null || y == null || x < 0 || x > el.clientWidth - 90) { d.style.display = "none"; return; } d.style.display = ""; d.style.left = x + "px"; d.style.top = (m.type === "high" ? y - 24 : y + 8) + "px"; });
     ch.timeScale().subscribeVisibleLogicalRangeChange(() => requestAnimationFrame(place));
     ch.subscribeCrosshairMove(() => {}); setTimeout(place, 60); setTimeout(place, 300);
     T.placeLabels = place;
   }
   T.cyc = cyc; T.futMarks = futMarks; T.LV = LV; T.path = path; T.band = band; T.price = price;
-  $("tNote").innerHTML = (cyc ? `Cycles ≈ ${cyc.periods.join(" / ")} bars combined · fit ${(cyc.strength * 100).toFixed(0)}%${cyc.strength < 0.3 ? " (weak — dates are rough windows)" : cyc.strength >= 0.55 ? " (strong)" : " (moderate)"}` : "No cycle detected") +
+  $("tNote").innerHTML = (cyc ? `Showing ${futMarks.length} of ${(T.allTurns || []).length} projected turns (≥ ${Math.round(T.minProb * 100)}% probability) · cycles ≈ ${cyc.periods.join(" / ")} bars · fit ${(cyc.strength * 100).toFixed(0)}%` : "No cycle detected") +
     (daily ? " · Forecast centre and ranges from the validated daily model" : ` · ${T.tf} forecast uses this timeframe's cycle and volatility (no directional model intraday)`) + ` · ${n} bars`;
   T.lastFull = Date.now();
   if (T.tab === "fc" || T.tab === "signal") side();
 }
+const m_tol = (ts) => `within ±${ts.tol} bar${ts.tol > 1 ? "s" : ""}`;
 function planNow() { if (!T.r || !T.r.fc) return null; const p = tradePlan(T.r, T.hz); S.fdate = isoD(addBars(T.r.fc.asof, T.hz, T.r.fc.calendar)); return p; }
 
 /* ================= load symbol / timeframe ================= */
@@ -385,10 +422,17 @@ function side(light) {
       if (ms) h += `<p class="note">Model check (last 12 months, unseen data): IC ${ms.ic_oos?.toFixed(3)}, t ${ms.t_ic?.toFixed(1)}, ranges held ${Math.round(ms.cov80_oos * 100)}% inside the 80% band. Weight used ${Math.round(ms.k * 100)}%.</p>`;
     }
     if (T.cyc) {
-      h += `<h4>Projected turning points (${T.tf})</h4>` + (T.futMarks.length ? T.futMarks.slice(0, 8).map((m) => `<div class="alrow"><span class="${m.type === "low" ? "up" : "down"}">${m.type === "low" ? "▼ Cycle low" : "▲ Cycle high"}</span><span>${fmtT(T.futT[m.k - 1])}</span><span>~${fmt.px(T.price * Math.exp(T.path(m.k)))}</span></div>`).join("") : `<p class="note">Cycle too weak to project turning points on this timeframe.</p>`);
-      h += `<p class="note">Built from the ${T.cyc.periods.length} strongest cycles (${T.cyc.periods.join(", ")} bars), which explain ${(T.cyc.strength * 100).toFixed(0)}% of the recent swings around the trend. Under 30% = weak; treat dates as approximate windows (± a few bars), not exact days.</p>`;
+      const ts = T.turnStats, allT = T.allTurns || [], shown = T.futMarks || [];
+      h += `<h4>High-probability turning points (${T.tf})</h4><div class="hzsel" id="mp">${[0.55, 0.65, 0.75].map((v) => `<button data-v="${v}" class="${Math.abs(v - T.minProb) < 0.001 ? "on" : ""}">≥ ${Math.round(v * 100)}%</button>`).join("")}</div>`;
+      h += shown.length ? shown.map((m) => `<div class="alrow"><span class="${m.type === "low" ? "up" : "down"}">${m.type === "low" ? "▼ Low" : "▲ High"}</span><span>${fmtT(T.futT[m.k - 1])}</span><span>~${fmt.px(T.price * Math.exp(T.path(m.k)))}</span><b class="${m.prob >= 0.75 ? "up" : ""}">${Math.round(m.prob * 100)}%</b></div>`).join("")
+        : `<p class="note"><b>No high-probability turns</b> on this timeframe right now — the projected dates for ${disp(T.r)} haven't been reliable enough in testing. Try another timeframe or a lower threshold.</p>`;
+      const hidden = allT.filter((m) => !shown.includes(m));
+      if (hidden.length) h += `<p class="note">Hidden (low probability): ${hidden.map((m) => `${m.type} ${fmtT(T.futT[m.k - 1])} (${Math.round(m.prob * 100)}%)`).join(", ")}.</p>`;
+      if (ts) h += `<p class="note">Probability = how often the 1st, 2nd, 3rd… projected turn matched a real swing ${m_tol(ts)} in ${ts.tests} replayed forecasts on this asset's ${T.tf} history (chance level ${Math.round(ts.base * 100)}%). A turn is shown only if it reaches your threshold <i>and</i> beats chance by 8+ points. Cycles ≈ ${T.cyc.periods.join(", ")} bars · fit ${(T.cyc.strength * 100).toFixed(0)}%.</p>`;
     }
-    B.innerHTML = h; return;
+    B.innerHTML = h;
+    B.querySelectorAll("#mp button").forEach((x) => (x.onclick = () => { T.minProb = +x.dataset.v; LS.set("term_minprob", T.minProb); draw(); side(); }));
+    return;
   }
   if (T.tab === "deriv") return deriv(B);
   if (T.tab === "alerts") {
