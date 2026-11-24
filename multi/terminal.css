@@ -83,3 +83,4 @@ body.term{overflow:hidden;height:100vh;display:flex;flex-direction:column}
 .turnlab .th{background:rgba(240,86,91,.18);color:#ff8f93;border-color:rgba(240,86,91,.55)}
 .turnlab .tl{background:rgba(34,195,142,.16);color:#5fe0b1;border-color:rgba(34,195,142,.5)}
 .fcnote{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:4;background:rgba(18,23,32,.92);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:11.5px;color:var(--mute);text-align:center;pointer-events:none;max-width:80%}
+.turnlab span.weak{opacity:.45;border-style:dashed}
