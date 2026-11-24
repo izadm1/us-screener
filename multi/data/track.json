@@ -18,10 +18,31 @@
    "Rm": 1,
    "p": 0.5781433782193707,
    "status": "open",
-   "last": 152.550003,
+   "last": 151.895004,
+   "openR": -0.02847757143034445,
+   "barsHeld": 0
+  },
+  {
+   "id": "TLT|TRAIL|1|2026-11-24",
+   "sym": "TLT",
+   "label": "TLT",
+   "cls": "etfs",
+   "side": 1,
+   "kind": "TRAIL",
+   "name": "Trend flip (ATR 20×3)",
+   "sigDate": "2026-11-24",
+   "logged": "2026-11-24T15:48:28.251Z",
+   "loggedDay": 1795564799,
+   "entry": 81.834999,
+   "stop": 79.47023521132112,
+   "target": 84.19976278867887,
+   "Rm": 1,
+   "p": 0.618577400667579,
+   "status": "open",
+   "last": 81.834999,
    "openR": 0,
    "barsHeld": 0
   }
  ],
- "updated": "2026-11-24T15:26:14.643Z"
+ "updated": "2026-11-24T15:48:28.251Z"
 }
