@@ -917,5 +917,5 @@ async function checkBuild() {
 }
 checkBuild();
 setInterval(checkBuild, 15 * 60 * 1000);
-if (/[?&]tab=picks/.test(location.search) || location.hash === "#picks") setTimeout(() => document.querySelector('#tabs button[data-cls="picks"]').click(), 300);
+{ const m = location.search.match(/[?&]tab=(\w+)/) || location.hash.match(/^#(\w+)$/); if (m) setTimeout(() => { const btn = document.querySelector(`#tabs button[data-cls="${m[1]}"]`); if (btn) btn.click(); }, 300); }
 load();
