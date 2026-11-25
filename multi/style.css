@@ -202,3 +202,11 @@ table.trk{min-width:900px}
 .metric .l{font-size:10.5px;color:var(--mute);text-transform:uppercase;letter-spacing:.3px}
 .metric .v{font:600 22px var(--mono)} .metric .s{font:11px var(--mono);color:var(--mute)}
 #track h3{margin-top:18px}
+
+.pbar{position:relative;height:8px;background:#1b2230;border-radius:4px;min-width:150px;margin:4px 0 3px}
+.pbar .pfill{position:absolute;top:0;bottom:0;border-radius:4px;opacity:.8}.pbar .pfill.g{background:#22c38e}.pbar .pfill.r{background:#f0565b}
+.pbar .pent{position:absolute;top:-3px;bottom:-3px;width:2px;background:#8a94a6}
+.pbar .pnow{position:absolute;top:-4px;width:10px;height:16px;margin-left:-5px;border-radius:3px;background:#e6e9ef;box-shadow:0 0 0 2px #0d1117}
+.ldot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#555e6e;vertical-align:middle}.ldot.on{background:#22c38e;box-shadow:0 0 6px #22c38e}
+.chip.g{background:rgba(34,195,142,.15);color:#22c38e}.chip.r{background:rgba(240,86,91,.15);color:#f0565b}.chip.warn{background:rgba(242,179,61,.15);color:#f2b33d}
+table.trk{min-width:1050px}

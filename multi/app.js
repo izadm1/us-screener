@@ -497,6 +497,10 @@ async function renderTrack() {
   const curve = pts.length ? `<svg viewBox="0 0 ${W} ${Hh + 4}" class="tcurve"><line x1="0" x2="${W}" y1="${Y(0)}" y2="${Y(0)}" stroke="#3a4352" stroke-dasharray="4 4"/><polyline fill="none" stroke="${cum >= 0 ? "#22c38e" : "#f0565b"}" stroke-width="2" points="${pts.map((v, i) => `${X(i)},${Y(v)}`).join(" ")}"/></svg>` : "";
   const row = (x) => { const r = findRow(x.sym); return `<tr data-s="${x.sym}"><td><b>${x.label || x.sym}</b> <span class="mute">${x.cls}</span></td><td class="${x.side > 0 ? "up" : "down"}">${x.side > 0 ? "BUY" : "SELL"}</td><td>${KIND_SHORT[x.kind] || x.kind}</td><td>${x.logged.slice(0, 16).replace("T", " ")}</td><td>${fmt.px(x.entry)}</td><td class="down">${fmt.px(x.stop)}</td><td class="up">${fmt.px(x.target)}</td><td>${Math.round(x.p * 100)}%</td>${x.status === "open" ? `<td class="${(x.openR || 0) >= 0 ? "up" : "down"}">${(x.openR || 0) >= 0 ? "+" : ""}${(x.openR || 0).toFixed(2)}R open</td>` : `<td class="${x.status === "win" ? "up" : "down"}"><b>${x.status.toUpperCase()}</b> ${x.R >= 0 ? "+" : ""}${x.R.toFixed(2)}R${x.expired ? " (time)" : ""} · ${x.exitDate}</td>`}</tr>`; };
   const tbl = (list) => `<div class="tablewrap"><table class="trk"><thead><tr><th>Asset</th><th>Side</th><th>Signal</th><th>Logged (UTC)</th><th>Entry</th><th>Stop</th><th>Target</th><th>Conf.</th><th>Result</th></tr></thead><tbody>${list.map(row).join("")}</tbody></table></div>`;
+  S.trackOpen = open.map((x) => x.sym); S.trackAt = Date.now();
+  const orow = (x) => `<tr data-s="${x.sym}" data-id="${x.id}" class="tlive"><td><b>${x.label || x.sym}</b> <span class="mute">${x.cls}</span><div class="mute" style="font-size:11px">${KIND_SHORT[x.kind] || x.kind} · ${Math.round(x.p * 100)}% conf.</div></td><td class="${x.side > 0 ? "up" : "down"}"><b>${x.side > 0 ? "BUY" : "SELL"}</b></td><td>${x.logged.slice(0, 16).replace("T", " ")}</td><td>${fmt.px(x.entry)}</td><td class="lpx"></td><td class="down">${fmt.px(x.stop)}</td><td class="up">${fmt.px(x.target)}</td><td class="lbar"></td><td class="lpl"></td><td class="lnote"></td></tr>`;
+  const otbl = `<div class="tablewrap"><table class="trk"><thead><tr><th>Asset</th><th>Side</th><th>Logged (UTC)</th><th>Entry</th><th>Live price</th><th>Stop</th><th>Target</th><th>Stop ◂ progress ▸ Target</th><th>Live P/L</th><th>Status</th></tr></thead><tbody>${open.map(orow).join("")}</tbody></table></div>`;
+  S.trackData = T;
   el.innerHTML = `<h2>Live track record</h2>
     <p class="note">Every ★ high-quality signal is logged automatically when it first appears, at the live price at that moment — no hindsight. It is closed as a <b>win</b> at its target, a <b>loss</b> at its stop (if both are hit the same day it counts as a loss), or at market after ${Q ? Q.H : 20} trading days. Results are in R (1R = the amount risked) and include trading costs. Recording since ${T.started.slice(0, 10)}.</p>
     <div class="metric tmet"><div class="m"><div class="l">Closed trades</div><div class="v">${closed.length}</div><div class="s">${open.length} open</div></div>
@@ -505,10 +509,35 @@ async function renderTrack() {
     <div class="m"><div class="l">Profit factor</div><div class="v">${gl ? (gw / gl).toFixed(2) : gw ? "∞" : "–"}</div><div class="s">tested: ${Q ? Q.test.pf.toFixed(2) : "–"}</div></div></div>
     ${closed.length < 30 ? `<p class="note">⚠ ${closed.length} closed trades is a small sample — expect the live win rate to swing a lot until there are 50–100 trades.</p>` : ""}
     ${curve ? `<h3>Cumulative result (R)</h3>${curve}` : ""}
-    <h3>Open signals (${open.length})</h3>${open.length ? tbl(open) : `<p class="note">None open.</p>`}
+    <h3>Open signals (${open.length}) <span class="mute" style="text-transform:none;font-weight:400">· live prices</span></h3>
+    ${open.length ? `<div class="note" id="openSum"></div>` + otbl + `<p class="note">Live price updates every few seconds (crypto via Binance, stocks/ETFs/forex via Finnhub when your key is set; otherwise the latest snapshot). A trade is only marked won or lost by the official daily bar — "target touched" / "stop touched" here is a heads-up, confirmed at the next update.</p>` : `<p class="note">None open.</p>`}
     <h3>Closed signals (${closed.length})</h3>${closed.length ? tbl(closed) : `<p class="note">None closed yet.</p>`}
     <p class="note">Updated ${T.updated ? T.updated.slice(0, 16).replace("T", " ") + " UTC" : ""}.</p>`;
   el.querySelectorAll("tr[data-s]").forEach((tr) => (tr.onclick = () => openDetail(tr.dataset.s)));
+  updTrackLive();
+}
+function updTrackLive() {
+  const T = S.trackData; if (!T || $("track").hidden) return;
+  const byId = {}; T.signals.forEach((x) => (byId[x.id] = x));
+  let sumR = 0, n = 0, up = 0;
+  document.querySelectorAll("#track tr.tlive").forEach((tr) => {
+    const x = byId[tr.dataset.id], r = findRow(x.sym); if (!x) return;
+    const px = r && r.price > 0 ? r.price : x.last || x.entry, risk = Math.abs(x.entry - x.stop);
+    const R = (x.side * (px - x.entry)) / risk, pct = (x.side * (px - x.entry)) / x.entry;
+    const age = r && r._live ? Math.round((Date.now() - r._live) / 1000) : null;
+    const live = age != null && age < 120;
+    const chg = r && r.chg1d != null ? `<span class="${r.chg1d >= 0 ? "up" : "down"}">${fmt.pct(r.chg1d, 2)} today</span>` : "";
+    tr.querySelector(".lpx").innerHTML = `<b style="font-size:14px">${fmt.px(px)}</b> <span class="ldot ${live ? "on" : ""}" title="${live ? "live · " + age + "s ago" : "snapshot price"}"></span><div style="font-size:11px">${chg}</div>`;
+    // progress from stop (0%) through entry to target (100%)
+    const pos = Math.max(0, Math.min(1, (R + 1) / (x.Rm + 1))), ent = 1 / (x.Rm + 1);
+    tr.querySelector(".lbar").innerHTML = `<div class="pbar"><div class="pfill ${R >= 0 ? "g" : "r"}" style="left:${Math.min(pos, ent) * 100}%;width:${Math.abs(pos - ent) * 100}%"></div><div class="pent" style="left:${ent * 100}%"></div><div class="pnow" style="left:${pos * 100}%"></div></div><div class="mute" style="font-size:11px;display:flex;justify-content:space-between"><span>${fmt.pct((x.side * (x.stop - px)) / px, 1)} to stop</span><span>${fmt.pct((x.side * (x.target - px)) / px, 1)} to target</span></div>`;
+    tr.querySelector(".lpl").innerHTML = `<b class="${R >= 0 ? "up" : "down"}">${R >= 0 ? "+" : ""}${R.toFixed(2)}R</b><div class="${pct >= 0 ? "up" : "down"}" style="font-size:11px">${pct >= 0 ? "+" : ""}${(pct * 100).toFixed(2)}%</div>`;
+    const hitT = x.side > 0 ? px >= x.target : px <= x.target, hitS = x.side > 0 ? px <= x.stop : px >= x.stop;
+    const left = Math.max(0, (S.sig && S.sig.quality ? S.sig.quality.H : 20) - (x.barsHeld || 0));
+    tr.querySelector(".lnote").innerHTML = hitT ? `<span class="chip g">🎯 Target touched</span>` : hitS ? `<span class="chip r">✕ Stop touched</span>` : R <= -0.75 ? `<span class="chip warn">Near stop</span>` : R >= x.Rm * 0.75 ? `<span class="chip g">Near target</span>` : `<span class="mute">Open · ${left}d left</span>`;
+    sumR += R; n++; if (R > 0) up++;
+  });
+  const s = $("openSum"); if (s && n) s.innerHTML = `Open trades right now: <b class="${sumR >= 0 ? "up" : "down"}">${sumR >= 0 ? "+" : ""}${sumR.toFixed(2)}R</b> combined · ${up} of ${n} in profit (live, before costs).`;
 }
 
 /* ---------------- detail drawer ---------------- */
