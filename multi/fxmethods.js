@@ -25,6 +25,8 @@ var FX = (function () {
   }
   const adxVal = (adx, i) => (adx && adx[i] != null ? adx[i] : null);
 
+  // live rule settings, chosen by the forex lab on the older half of the data (see data/fxlab.json)
+  const FXRULE = { quiet: { z: 2.5, adx: 20, k: 1.5, H: 5, half: 1 }, std: { z: 2.5, k: 1, H: 5, half: 0 }, pairsExcluded: ["GC=F"] };
   // ---------- mean reversion core: fade a z-score stretch back toward the N-bar mean ----------
   const _adxc = new WeakMap();
   const adxA_cache = (B) => { if (!_adxc.has(B)) _adxc.set(B, adxA(B, 14)); return _adxc.get(B); };
@@ -70,6 +72,13 @@ var FX = (function () {
       return out;
     },
     // Mean reversion in quiet (low-ADX) markets: fade 2σ stretches back toward the 20-day mean
+    // live forex rule: ★ high-accuracy plan in quiet markets (ADX<20), standard plan otherwise
+    d_fx(D, p) {
+      const A = adxA_cache(D);
+      const quiet = mr(D, { ...FXRULE.quiet, adx: FXRULE.quiet.adx }, (i) => adxVal(A, i), "★ Range reversion");
+      const std = p.tier === "quiet" ? [] : mr(D, { ...FXRULE.std, adx: 999 }, (i) => { const v = adxVal(A, i); return v != null && v >= FXRULE.quiet.adx ? v : null; }, "Range reversion");
+      return quiet.map((x) => ({ ...x, tier: "quiet" })).concat(p.tier === "quiet" ? [] : std.map((x) => ({ ...x, tier: "std" }))).filter((x) => !p.tier || p.tier === "all" || x.tier === p.tier).sort((a, b) => a.i - b.i);
+    },
     d_mr(D, p) { return mr(D, p, (i) => adxVal(adxA_cache(D), i), "Range reversion (daily)"); },
     // Time-series momentum + pullback to the 20 EMA
     d_mom(D, p) {
@@ -152,6 +161,6 @@ var FX = (function () {
     const w = tr.filter((x) => x.R > 0), gw = w.reduce((s, x) => s + x.R, 0), gl = -tr.filter((x) => x.R <= 0).reduce((s, x) => s + x.R, 0), sum = tr.reduce((s, x) => s + x.R, 0);
     return { n, win: w.length / n, avgR: sum / n, pf: gl ? gw / gl : 99, sumR: sum };
   }
-  return { COST, cost, dailyCtx, prevDay, daily, hourly, simulate, stats, dayKey, hourUTC };
+  return { FXRULE, COST, cost, dailyCtx, prevDay, daily, hourly, simulate, stats, dayKey, hourUTC };
 })();
 if (typeof module !== "undefined") module.exports = FX;
