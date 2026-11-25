@@ -6,11 +6,13 @@ import path from "path";
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const M = require(path.resolve(path.dirname(new URL(import.meta.url).pathname), "../tmath.js"));
+const FXM = require(path.resolve(path.dirname(new URL(import.meta.url).pathname), "../fxmethods.js"));
 const DIR = process.argv[2] || "multi/data";
 const read = (f) => JSON.parse(fs.readFileSync(path.join(DIR, f)));
 const S = read("screener.json");
 let A = null; try { A = read("accuracy.json"); } catch (e) { console.log("no accuracy.json — signals will carry no tested stats"); }
 let META = null; try { META = read("meta.json"); if (!META.model) META = null; } catch (e) { console.log("no meta.json — no high-quality filter"); }
+let FXL = null; try { FXL = read("fxlab.json"); } catch (e) { console.log("no fxlab.json — forex signals carry no tested stats"); }
 const TRACK = process.argv.includes("--track") ? path.join(DIR, "track.json") : null;
 const COST = { equity: 0.001, crypto: 0.002, forex: 0.0004 };
 // tested win rate at a given model confidence (from the unseen test period)
@@ -32,7 +34,8 @@ const REG = { equity: bars("SPY") ? regimeMap(bars("SPY")) : {}, crypto: bars("B
 const regAt = (cls, t) => { if (cls === "forex") return 0; const m = REG[cls === "crypto" ? "crypto" : "equity"]; for (let k = 0; k < 6; k++) { const v = m[Math.floor(t / 86400) - k]; if (v) return v; } return 0; };
 const iso = (t) => new Date(t * 1000).toISOString().slice(0, 10);
 
-const out = { generated: S.generated, tested: { trail: TRAIL, pullback: PB, wyckoff: WYV, date: A ? A.generated : null }, quality: META ? { threshold: META.model.threshold, Rm: META.model.Rm, H: META.model.H, test: META.model.test, testBase: META.model.testBase, samples: META.samples, assets: META.assets, split: META.split, date: META.generated, grid: META.byR[META.model.Rm].test } : null, assets: {} };
+const fxStat = (k) => (FXL && FXL.methods[k] && FXL.methods[k].best ? FXL.methods[k].best.test : null);
+const out = { generated: S.generated, fx: FXL ? { rule: FXM.FXRULE, split: FXL.split["1D"], lab: FXL.generated, all: fxStat("fx_live"), quiet: fxStat("fx_quiet"), std: fxStat("fx_std"), trendPullback: fxStat("d_pb"), trendFlip: fxStat("d_trail"), breakout: fxStat("d_brk"), intraday: fxStat("h_pb") } : null, tested: { trail: TRAIL, pullback: PB, wyckoff: WYV, date: A ? A.generated : null }, quality: META ? { threshold: META.model.threshold, Rm: META.model.Rm, H: META.model.H, test: META.model.test, testBase: META.model.testBase, samples: META.samples, assets: META.assets, split: META.split, date: META.generated, grid: META.byR[META.model.Rm].test } : null, assets: {} };
 for (const [cls, list] of Object.entries(S.classes)) for (const r of list) {
   const b = bars(r.sym); if (!b || b.length < 230) continue;
   const n = b.length, st = M.stA(b, CFG.stN, CFG.stM), atr = M.atrA(b, 14), r2 = M.rsiA(b, 2), wy = M.wyckoff(b);
@@ -56,9 +59,31 @@ for (const [cls, list] of Object.entries(S.classes)) for (const r of list) {
       return { side: k.side, kind: k.kind, name: k.kind === "TRAIL" ? "Trend flip (ATR 20×3)" : k.kind === "PULLBACK" ? "RSI(2) pullback in trend" : `Wyckoff ${WY_NAME[k.kind] || k.kind}`, date: iso(b[k.i].t), bars: n - 1 - k.i, price: e, stop: k.stop, target: e + k.side * m.Rm * risk, Rm: m.Rm, risk: risk / e, p, exp: winAt(p), now: b[n - 1].c, move: k.side * (b[n - 1].c / e - 1), stopped, done: hit };
     }).filter((x) => x.p >= m.threshold && !x.stopped && !x.done).sort((a, c) => c.p - a.p || a.bars - c.bars);
   }
+  // ---- forex: trend signals lost money on forex in the forex lab → replaced by the tested daily range-reversion rule ----
+  let fx = null;
+  if (cls === "forex") {
+    hq = []; fresh.length = 0;
+    fx = { edge: !FXM.FXRULE.pairsExcluded.includes(r.sym), active: [] };
+    if (fx.edge) {
+      const today = new Date().toISOString().slice(0, 10);
+      const bc = iso(b[n - 1].t) >= today ? b.slice(0, -1) : b; // completed daily bars only
+      const nc = bc.length;
+      for (const k of FXM.daily.d_fx(bc, { tier: "all" })) {
+        const age = nc - 1 - k.i; if (age > k.H) continue;
+        const e0 = bc[k.i].c, stop0 = e0 - k.side * k.risk; let tgt = k.tgtPx; if (Math.abs(tgt - e0) > 3 * k.risk) tgt = e0 + k.side * 3 * k.risk;
+        const after = b.slice(k.i + 1); // includes today's bar so far
+        const e = after.length ? after[0].o : e0, stop = e - k.side * k.risk;
+        const stopped = k.side > 0 ? after.some((y) => y.l <= stop) : after.some((y) => y.h >= stop), hit = k.side > 0 ? after.some((y) => y.h >= tgt) : after.some((y) => y.l <= tgt);
+        if (k.side * (tgt - e0) <= 0.2 * k.risk) continue;
+        fx.active.push({ side: k.side, tier: k.tier, kind: "FXREV", name: k.tier === "quiet" ? "★ Range reversion (quiet market)" : "Range reversion", date: iso(bc[k.i].t), bars: age, price: e0, entry: after.length ? e : null, stop: after.length ? stop : stop0, stopDist: k.risk, target: tgt, H: k.H, daysLeft: k.H - age, stopped, done: hit, rr: Math.abs(tgt - e0) / k.risk });
+      }
+      fx.active = fx.active.filter((x) => !x.stopped && !x.done).sort((a, c) => a.bars - c.bars);
+    }
+  }
   out.assets[r.sym] = {
+    fx,
     hq: hq[0] || null, hqAll: hq.slice(0, 3),
-    best: fresh[0] || null, fresh: fresh.slice(0, 3), last: last ? fmt(last) : null,
+    best: fresh[0] || null, fresh: fresh.slice(0, 3), last: last && cls !== "forex" ? fmt(last) : null,
     lastClose: b[n - 1].c, lastDay: Math.floor(b[n - 1].t / 86400) * 86400 + 86399,
     trail: { dir: st.dir[n - 1], stop: st.stop[n - 1] }, wyckoff: { phase: wy.phase[n - 1], bias: +wy.bias[n - 1].toFixed(2), hasVol: wy.hasVol },
   };
@@ -68,6 +93,14 @@ if (TRACK && META) {
   let T = { started: new Date().toISOString(), signals: [] }; try { T = JSON.parse(fs.readFileSync(TRACK)); } catch (e) {}
   const now = new Date().toISOString(), seen = new Set(T.signals.map((x) => x.id)), m = META.model;
   const clsMap = {}; Object.entries(S.classes).forEach(([c, l]) => l.forEach((r) => (clsMap[r.sym] = { c, label: r.label || r.sym.replace(/\d{3,}-USD$/, "-USD"), name: r.name })));
+  for (const [sym, a] of Object.entries(out.assets)) for (const x of (a.fx && a.fx.active) || []) {
+    if (x.bars > 0) continue; // log on the day the forex signal appears
+    const id = `${sym}|FXREV|${x.side}|${x.date}`; if (seen.has(id)) continue;
+    const e = a.lastClose, stop = e - x.side * x.stopDist, risk = x.stopDist;
+    if (x.side * (x.target - e) <= 0.2 * risk) continue; // price already ran to the target
+    T.signals.push({ id, sym, label: clsMap[sym].label, cls: clsMap[sym].c, side: x.side, kind: "FXREV", name: x.name, sigDate: x.date, logged: now, loggedDay: a.lastDay, entry: e, stop, target: x.target, Rm: +(Math.abs(x.target - e) / risk).toFixed(2), H: x.H, tier: x.tier, p: x.tier === "quiet" ? (out.fx && out.fx.quiet ? out.fx.quiet.win : 0.6) : (out.fx && out.fx.std ? out.fx.std.win : 0.5), status: "open" });
+    seen.add(id);
+  }
   for (const [sym, a] of Object.entries(out.assets)) for (const x of a.hqAll || []) {
     if (x.bars > 1) continue; // only log while the signal is fresh, so the logged entry is close to the signal
     const id = `${sym}|${x.kind}|${x.side}|${x.date}`; if (seen.has(id)) continue;
@@ -80,12 +113,12 @@ if (TRACK && META) {
     const b = bars(s.sym); if (!b) continue;
     const after = b.filter((x) => x.t > s.loggedDay); // judge only on bars after the day it was logged
     const c0 = { stocks: "equity", etfs: "equity", indices: "equity", crypto: "crypto", forex: "forex" }[s.cls] || "equity";
-    const risk = Math.abs(s.entry - s.stop), costR = (COST[c0] * s.entry) / risk;
+    const risk = Math.abs(s.entry - s.stop), costR = ((s.cls === "forex" ? FXM.cost(s.sym) : COST[c0]) * s.entry) / risk;
     for (let j = 0; j < after.length; j++) {
       const x = after[j], hitS = s.side > 0 ? x.l <= s.stop : x.h >= s.stop, hitT = s.side > 0 ? x.h >= s.target : x.l <= s.target;
       if (hitS) { Object.assign(s, { status: "loss", exit: s.stop, exitDate: iso(x.t), R: -1 - costR }); break; }
-      if (hitT) { Object.assign(s, { status: "win", exit: s.target, exitDate: iso(x.t), R: s.Rm - costR }); break; }
-      if (j + 1 >= (m.H || 20)) { const R = (s.side * (x.c - s.entry)) / risk - costR; Object.assign(s, { status: R > 0 ? "win" : "loss", exit: x.c, exitDate: iso(x.t), R, expired: true }); break; }
+      if (hitT) { Object.assign(s, { status: "win", exit: s.target, exitDate: iso(x.t), R: Math.abs(s.target - s.entry) / risk - costR }); break; }
+      if (j + 1 >= (s.H || m.H || 20)) { const R = (s.side * (x.c - s.entry)) / risk - costR; Object.assign(s, { status: R > 0 ? "win" : "loss", exit: x.c, exitDate: iso(x.t), R, expired: true }); break; }
     }
     if (s.status === "open") { const L = b[b.length - 1]; s.last = L.c; s.openR = (s.side * (L.c - s.entry)) / risk; s.barsHeld = after.length; }
   }

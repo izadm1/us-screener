@@ -226,10 +226,16 @@ function draw() {
     }
   }
   // candle markers: signals + past turns
-  const mk = []; T.trailSigs = [];
+  const mk = []; T.trailSigs = []; const isFx = r._cls === "forex";
   for (let i = 1; i < n; i++) if (st.dir[i] !== st.dir[i - 1] && st.stop[i - 1] != null && sigOk(i, st.dir[i])) T.trailSigs.push({ i, side: st.dir[i] });
-  if (T.tog.sig) T.pbSigs.forEach((s) => mk.push({ time: b[s.i].t, position: s.side > 0 ? "belowBar" : "aboveBar", color: s.side > 0 ? "#7fd3ff" : "#ffb37f", shape: "circle", size: 0.7, text: s.side > 0 ? "BUY PB" : "SELL PB" }));
-  if (T.tog.sig) { // entry signals only: BUY when the ATR trail flips up, SELL when it flips down
+  if (T.tog.sig && !isFx) T.pbSigs.forEach((s) => mk.push({ time: b[s.i].t, position: s.side > 0 ? "belowBar" : "aboveBar", color: s.side > 0 ? "#7fd3ff" : "#ffb37f", shape: "circle", size: 0.7, text: s.side > 0 ? "BUY PB" : "SELL PB" }));
+  T.fxSigs = [];
+  if (isFx && T.tf === "1D" && !FX.FXRULE.pairsExcluded.includes(r.sym)) { // forex: the tested daily range-reversion rule replaces trend entries
+    const bc = new Date(b[n - 1].t * 1000).toISOString().slice(0, 10) >= new Date().toISOString().slice(0, 10) ? b.slice(0, -1) : b;
+    T.fxSigs = FX.daily.d_fx(bc, { tier: "all" });
+    if (T.tog.sig) T.fxSigs.forEach((k) => mk.push({ time: b[k.i].t, position: k.side > 0 ? "belowBar" : "aboveBar", color: k.side > 0 ? (k.tier === "quiet" ? "#00ffb3" : "#22c38e") : k.tier === "quiet" ? "#ff4d6d" : "#f0565b", shape: k.side > 0 ? "arrowUp" : "arrowDown", text: `${k.tier === "quiet" ? "★ " : ""}REV ${k.side > 0 ? "BUY" : "SELL"}` }));
+  }
+  if (T.tog.sig && !isFx) { // entry signals only: BUY when the ATR trail flips up, SELL when it flips down
     for (let i = 1; i < n; i++) {
       if (st.dir[i] !== st.dir[i - 1] && st.stop[i - 1] != null && sigOk(i, st.dir[i])) mk.push({ time: b[i].t, position: st.dir[i] === 1 ? "belowBar" : "aboveBar", color: st.dir[i] === 1 ? "#22c38e" : "#f0565b", shape: st.dir[i] === 1 ? "arrowUp" : "arrowDown", text: st.dir[i] === 1 ? "BUY" : "SELL" });
     }
@@ -237,7 +243,7 @@ function draw() {
   // Wyckoff: range, phase, events; ★ = event type validated by the accuracy test on this timeframe
   const wy = wyckoff(b), VAL = wyValidated(T.tf);
   T.hqSigs = [];
-  if (T.tf === "1D" && T.meta && T.meta.model && n > 260) {
+  if (T.tf === "1D" && T.meta && T.meta.model && n > 260 && !isFx) {
     const Mo = T.meta.model, ctx = metaPrep(b, r._cls, regimeAt);
     T.hqSigs = metaCands(ctx, n - 120).map((k) => ({ ...k, p: metaProb(Mo, metaFeat(ctx, k)) })).filter((k) => k.p >= Mo.threshold);
     T.hqSigs.forEach((k) => mk.push({ time: b[k.i].t, position: k.side > 0 ? "belowBar" : "aboveBar", color: k.side > 0 ? "#00ffb3" : "#ff4d6d", shape: k.side > 0 ? "arrowUp" : "arrowDown", text: `★★ HQ ${k.side > 0 ? "BUY" : "SELL"} ${Math.round(k.p * 100)}%` }));
@@ -246,7 +252,7 @@ function draw() {
   if (T.tog.wy) {
     wy.events.forEach((e) => {
       if (e.type === "AR") { mk.push({ time: b[e.i].t, position: "aboveBar", color: "#8a93a3", shape: "circle", size: 0.4, text: "AR" }); return; }
-      const v = VAL[e.type];
+      const v = isFx ? null : VAL[e.type];
       if (v) mk.push({ time: b[e.i].t, position: e.side > 0 ? "belowBar" : "aboveBar", color: e.side > 0 ? "#2ee6a6" : "#ff6b70", shape: e.side > 0 ? "arrowUp" : "arrowDown", text: `★ ${e.side > 0 ? "BUY" : "SELL"} ${e.type}` });
       else mk.push({ time: b[e.i].t, position: e.side > 0 ? "belowBar" : "aboveBar", color: "rgba(138,147,163,.8)", shape: "circle", size: 0.4, text: e.type });
     });
@@ -277,8 +283,9 @@ function draw() {
   });
   if (r.fc && T.tog.fc) { const p = planNow(); if (p && p.dir) { cs.createPriceLine({ price: p.stop, color: "#f0565b", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "STOP" }); p.targets.forEach((t, i) => cs.createPriceLine({ price: t.price, color: "#22c38e", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: `T${i + 1}` })); } }
   const AC = accFor(T.tf);
-  if (T.tog.sig && CFG.pb && AC && AC.pb) leg.push(["#7fd3ff", `BUY/SELL PB = RSI(2) pullback in trend + market regime — tested: ${Math.round(AC.pb.valid.win * 100)}% wins, profit factor ${AC.pb.valid.pf.toFixed(2)}`]);
-  if (T.tog.sig) leg.push(["#22c38e", `BUY/SELL${CFG.filt === "ema200" ? " · 200-EMA trend" : CFG.filt === "daily" ? " · daily trend" : ""}${CFG.adx ? ` · ADX ≥ ${CFG.adx}` : ""}${CFG.session && r._cls === "forex" ? " · London/NY hours" : ""}${CFG.exit === "half1R" ? " · ½ off at 1R, stop to breakeven" : ""}` + (AC && AC.tr ? ` — tested on ${AC.symbols} assets: profit factor ${AC.tr.valid.pf.toFixed(2)}, ${Math.round(AC.tr.valid.win * 100)}% wins, ${AC.tr.valid.n} trades` : " — not tested on this timeframe")]);
+  if (isFx) { const Q = T.fxq; if (T.tog.sig) leg.push(["#00ffb3", T.tf === "1D" ? (FX.FXRULE.pairsExcluded.includes(r.sym) ? "No tested entry on gold — no BUY/SELL shown" : `REV BUY/SELL = daily range reversion (fade a 2.5σ stretch to the 20-day mean)${Q && Q.all ? ` — tested on 11 pairs, unseen data: ${Math.round(Q.all.win * 100)}% wins, PF ${Q.all.pf.toFixed(2)}; ★ quiet market ${Math.round(Q.quiet.win * 100)}%` : ""}`) : "Forex entries are daily only — no intraday method held up in the forex lab. Switch to 1D for signals."]); }
+  else if (T.tog.sig && CFG.pb && AC && AC.pb) leg.push(["#7fd3ff", `BUY/SELL PB = RSI(2) pullback in trend + market regime — tested: ${Math.round(AC.pb.valid.win * 100)}% wins, profit factor ${AC.pb.valid.pf.toFixed(2)}`]);
+  if (T.tog.sig && !isFx) leg.push(["#22c38e", `BUY/SELL${CFG.filt === "ema200" ? " · 200-EMA trend" : CFG.filt === "daily" ? " · daily trend" : ""}${CFG.adx ? ` · ADX ≥ ${CFG.adx}` : ""}${CFG.session && r._cls === "forex" ? " · London/NY hours" : ""}${CFG.exit === "half1R" ? " · ½ off at 1R, stop to breakeven" : ""}` + (AC && AC.tr ? ` — tested on ${AC.symbols} assets: profit factor ${AC.tr.valid.pf.toFixed(2)}, ${Math.round(AC.tr.valid.win * 100)}% wins, ${AC.tr.valid.n} trades` : " — not tested on this timeframe")]);
   if (T.tog.wy) { const vk = Object.keys(VAL); leg.push(["#2ee6a6", `Wyckoff — ★ tested signals on ${T.tf}: ${vk.length ? vk.map((k) => `${k} (PF ${VAL[k].pf.toFixed(2)})`).join(", ") : "none passed on this timeframe"} · grey = context only`]); }
   $("tLeg").innerHTML = leg.map(([c, t]) => `<span style="--c:${c}">${t}</span>`).join("");
 
@@ -360,6 +367,18 @@ function hqTermCard() {
   return `<div class="plan ${x.side > 0 ? "sb2" : "ss2"}"><div class="planhead"><div><div class="l">★★ High-quality signal · daily</div><div class="big">${x.side > 0 ? "BUY" : "SELL"}</div></div><div class="conv"><div class="l">Tested win rate</div><div class="cv">${w != null ? Math.round(w * 100) + "%" : "–"}</div><div style="font:11px var(--mono);color:var(--mute)">confidence ${Math.round(x.p * 100)}%</div></div></div>
     ${MT.btn({ sym: T.r.sym, label: disp(T.r), cls: T.r._cls, side: x.side, stop: x.stop, target: x.tgt, src: "★★ HQ " + name + " " + Math.round(x.p * 100) + "%" })}
     <div class="pgrid"><div><div class="l">Trigger</div><div class="v" style="font-size:13px">${name}</div><div class="s">${fmtT(b[x.i].t)}</div></div><div><div class="l">Entry</div><div class="v">${fmt.px(x.e)}</div><div class="s">now ${fmt.px(b[n - 1].c)}</div></div><div><div class="l">Stop</div><div class="v down">${fmt.px(x.stop)}</div></div><div><div class="l">Target (${Mo.Rm}R)</div><div class="v up">${fmt.px(x.tgt)}</div></div><div><div class="l">Time limit</div><div class="v" style="font-size:13px">${Mo.H} days</div></div></div></div>`;
+}
+function fxTermCard() {
+  const r = T.r, b = T.bars, n = b.length, Q = T.fxq, pip = /JPY/.test(r.label || r.sym) ? 0.01 : 0.0001;
+  if (FX.FXRULE.pairsExcluded.includes(r.sym)) return `<div class="plan sn"><div class="l">Forex signal (tested)</div><div class="big">NO TESTED EDGE</div><p class="note" style="margin:6px 0 0">Gold trends rather than mean-reverts; none of the tested entries held up on it, so no BUY/SELL is shown.</p></div>`;
+  if (T.tf !== "1D") return `<div class="plan sn"><div class="l">Forex signal (tested)</div><div class="big">DAILY ONLY</div><p class="note" style="margin:6px 0 0">No hourly or 4-hour forex entry held up in the forex lab (London breakout, hourly trend dips and hourly reversion all lost money on unseen data). Switch to <b>1D</b> for the tested signal.</p></div>`;
+  const live = (T.fxSigs || []).map((k) => { const age = (n - 1) - k.i - (new Date(b[n - 1].t * 1000).toISOString().slice(0, 10) >= new Date().toISOString().slice(0, 10) ? 1 : 0); const after = b.slice(k.i + 1), e = after.length ? after[0].o : b[k.i].c, stop = e - k.side * k.risk, tgt = Math.abs(k.tgtPx - b[k.i].c) > 3 * k.risk ? b[k.i].c + k.side * 3 * k.risk : k.tgtPx;
+    const out = k.side > 0 ? after.some((y) => y.l <= stop || y.h >= tgt) : after.some((y) => y.h >= stop || y.l <= tgt); return { ...k, age, e, stop, tgt, out }; }).filter((k) => k.age <= k.H && !k.out).sort((a, c) => a.age - c.age);
+  if (!live.length) return `<div class="plan sn"><div class="l">Forex signal (tested) · daily range reversion</div><div class="big">NO SIGNAL RIGHT NOW</div><p class="note" style="margin:6px 0 0">${disp(r)} is not stretched 2.5σ from its 20-day average. ${Q && Q.all ? `This rule won ${Math.round(Q.all.win * 100)}% (PF ${Q.all.pf.toFixed(2)}, ${Q.all.n} trades) on unseen data; trend pullbacks on forex won only ${Math.round(Q.trendPullback.win * 100)}%.` : ""} Signals are rare — wait for one.</p></div>`;
+  const x = live[0], s = Q ? (x.tier === "quiet" ? Q.quiet : Q.std) : null, now = b[n - 1].c;
+  return `<div class="plan ${x.side > 0 ? "sb2" : "ss2"}"><div class="planhead"><div><div class="l">${x.tier === "quiet" ? "★ High-accuracy forex signal" : "Forex signal"} · daily</div><div class="big">${x.side > 0 ? "BUY" : "SELL"}</div></div><div class="conv"><div class="l">Tested win rate</div><div class="cv">${s ? Math.round(s.win * 100) + "%" : "–"}</div><div style="font:11px var(--mono);color:var(--mute)">${s ? `PF ${s.pf.toFixed(2)} · ${s.n} trades` : ""}</div></div></div>
+    ${MT.btn({ sym: r.sym, label: disp(r), cls: r._cls, side: x.side, stop: now - x.side * x.risk, target: x.tgt, src: (x.tier === "quiet" ? "★ " : "") + "FX range reversion" })}
+    <div class="pgrid"><div><div class="l">Setup</div><div class="v" style="font-size:13px">2.5σ ${x.side > 0 ? "below" : "above"} 20-day mean</div><div class="s">${fmtT(b[x.i].t)}</div></div><div><div class="l">Entry</div><div class="v">${fmt.px(x.age ? x.e : now)}</div><div class="s">now ${fmt.px(now)}</div></div><div><div class="l">Stop</div><div class="v down">${(x.risk / pip).toFixed(1)} pips</div><div class="s">from your fill</div></div><div><div class="l">Target</div><div class="v up">${fmt.px(x.tgt)}</div><div class="s">${x.tier === "quiet" ? "half-way to the mean" : "the 20-day mean"}</div></div><div><div class="l">Time limit</div><div class="v" style="font-size:13px">${Math.max(0, x.H - x.age)} days left</div></div></div></div>`;
 }
 function myPosCard() {
   const r = T.r, mine = MT.openFor(r.sym);
@@ -489,7 +508,7 @@ function side(light) {
   if (T.tab === "signal") {
     if (!r.fc) { B.innerHTML = `<p class="note">No model forecast for this asset.</p>`; return; }
     const p = planNow();
-    B.innerHTML = myPosCard() + hqTermCard() + bestCard() + wyCard() + `<h4>Model trade plan</h4><div class="hzsel" id="hz">${[[5, "1W"], [21, "1M"], [63, "3M"], [126, "6M"]].map(([h, l]) => `<button data-h="${h}" class="${h === T.hz ? "on" : ""}">${l}</button>`).join("")}</div>${planCard(r, p)}
+    B.innerHTML = myPosCard() + (r._cls === "forex" ? fxTermCard() : hqTermCard() + bestCard() + wyCard()) + `<h4>Model trade plan</h4><div class="hzsel" id="hz">${[[5, "1W"], [21, "1M"], [63, "3M"], [126, "6M"]].map(([h, l]) => `<button data-h="${h}" class="${h === T.hz ? "on" : ""}">${l}</button>`).join("")}</div>${planCard(r, p)}
       <h4>Key levels (${T.tf})</h4>${(T.LV ? T.LV.res.slice().reverse().map((l, i) => `<div class="alrow"><span>Resistance · ${l.n} touch${l.n > 1 ? "es" : ""}</span><span class="down">${fmt.px(l.p)}</span></div>`).join("") + `<div class="alrow"><span><b>Price</b></span><b>${fmt.px(T.price)}</b></div>` + T.LV.sup.map((l) => `<div class="alrow"><span>Support · ${l.n} touch${l.n > 1 ? "es" : ""}</span><span class="up">${fmt.px(l.p)}</span></div>`).join("") : "")}`;
     B.querySelectorAll("#hz button").forEach((x) => (x.onclick = () => { T.hz = +x.dataset.h; side(); draw(); }));
     return;
@@ -646,6 +665,7 @@ async function boot() {
   S.data = await fetchJ("data/screener.json?" + Date.now());
   T.acc = await fetchJ("data/accuracy.json?" + Date.now()).catch(() => null);
   T.meta = await fetchJ("data/meta.json?" + Date.now()).catch(() => null);
+  T.fxq = await fetchJ("data/signals.json?" + Date.now()).then((j) => j.fx).catch(() => null);
   await loadRegime();
   Object.entries(S.data.classes).forEach(([c, l]) => l.forEach((x) => (x._cls = c)));
   [...$("tTog").children].forEach((x) => x.classList.toggle("on", !!T.tog[x.dataset.k]));

@@ -21,14 +21,47 @@ const PRESETS = {
 const SG = (r) => (S.sig && S.sig.assets && S.sig.assets[r.sym]) || null;
 const TS_SHORT = { TRAIL: "Trend flip", PULLBACK: "Pullback", SOS: "Wyckoff SOS", SOW: "Wyckoff SOW", SC: "Wyckoff SC", ST: "Wyckoff ST", LPS: "Wyckoff LPS", LPSY: "Wyckoff LPSY", Spring: "Wyckoff Spring", UT: "Wyckoff UT", UTAD: "Wyckoff UTAD", BC: "Wyckoff BC" };
 const HQ = (r) => { const g = SG(r); return g && g.hq ? g.hq : null; };
-const KIND_SHORT = { TRAIL: "Trend flip", PULLBACK: "Pullback", SOS: "Wyckoff SOS", SOW: "Wyckoff SOW", SC: "Wyckoff SC", ST: "Wyckoff ST", LPS: "Wyckoff LPS", LPSY: "Wyckoff LPSY", Spring: "Wyckoff Spring", UT: "Wyckoff UT", UTAD: "Wyckoff UTAD", BC: "Wyckoff BC" };
-function hqScore(r) { const x = HQ(r); return x ? x.side * (x.p * 100 - x.bars * 0.5) : null; }
+const KIND_SHORT = { FXREV: "FX range reversion", TRAIL: "Trend flip", PULLBACK: "Pullback", SOS: "Wyckoff SOS", SOW: "Wyckoff SOW", SC: "Wyckoff SC", ST: "Wyckoff ST", LPS: "Wyckoff LPS", LPSY: "Wyckoff LPSY", Spring: "Wyckoff Spring", UT: "Wyckoff UT", UTAD: "Wyckoff UTAD", BC: "Wyckoff BC" };
+/* ---- forex: tested daily range-reversion rule (trend entries lost money on forex in the forex lab) ---- */
+const FXS = (r) => { const g = SG(r); return g && g.fx ? g.fx : null; };
+const FXA = (r) => { const f = FXS(r); return f && f.active && f.active.length ? f.active[0] : null; };
+const FXQ = () => (S.sig && S.sig.fx) || null;
+const pipSize = (r) => (/JPY/.test(r.label || r.sym) ? 0.01 : r.sym === "GC=F" ? 0.1 : 0.0001);
+const pips = (r, d) => (Math.abs(d) / pipSize(r)).toFixed(r.sym === "GC=F" ? 0 : 1);
+const fxTierStat = (x) => { const Q = FXQ(); return Q ? (x.tier === "quiet" ? Q.quiet : Q.std) : null; };
+function fxCell(r) {
+  const f = FXS(r), x = FXA(r);
+  if (!f) return '<span class="mute tsl">—</span>';
+  if (!f.edge) return '<span class="mute tsl">no tested edge</span>';
+  if (!x) return '<span class="mute tsl">no signal (rare by design)</span>';
+  const s = fxTierStat(x);
+  return `<span class="sigchip ${x.side > 0 ? "sb2" : "ss2"}" title="${x.name} on ${x.date}. Tested on unseen data: ${s ? Math.round(s.win * 100) + "% wins, profit factor " + s.pf.toFixed(2) + " over " + s.n + " trades" : ""}.">${x.tier === "quiet" ? "★ " : ""}${x.side > 0 ? "BUY" : "SELL"}</span> <span class="tsl">Range reversion · ${s ? Math.round(s.win * 100) + "% tested win" : ""} · ${x.bars ? x.bars + "d ago" : "new"}</span>`;
+}
+function fxCard(r) {
+  const f = FXS(r), Q = FXQ(), px = fmt.px;
+  if (!f) return "";
+  if (!f.edge) return `<div class="plan sn"><div class="l">Forex signal (tested)</div><div class="big">NO TESTED EDGE</div><p class="note" style="margin:6px 0 0">Gold trends rather than mean-reverts, and none of the entry methods we tested on it held up on unseen data — so no entry signal is shown. The model view below is a forecast, not a tested entry.</p></div>`;
+  const x = FXA(r);
+  if (!x) return `<div class="plan sn"><div class="l">Forex signal (tested)</div><div class="big">NO SIGNAL RIGHT NOW</div><p class="note" style="margin:6px 0 0">${disp(r)} is not stretched enough to fade. Forex signals come from one rule that held up on unseen data — fading a 2.5σ stretch back toward the 20-day average${Q && Q.all ? ` (${Math.round(Q.all.win * 100)}% wins, profit factor ${Q.all.pf.toFixed(2)}, ${Q.all.n} test trades)` : ""}. They are rare: about one a week across all 11 pairs. Trend-following entries were tested too and lost money on forex${Q && Q.trendPullback ? ` (trend pullback: ${Math.round(Q.trendPullback.win * 100)}% wins, PF ${Q.trendPullback.pf.toFixed(2)})` : ""}, so they are no longer shown for forex.</p></div>`;
+  const s = fxTierStat(x), now = r.price, entry = x.entry || now;
+  return `<div class="plan ${x.side > 0 ? "sb2" : "ss2"}"><div class="planhead"><div><div class="l">${x.tier === "quiet" ? "★ High-accuracy forex signal" : "Forex signal"} · daily range reversion</div><div class="big">${x.side > 0 ? "BUY" : "SELL"} ${disp(r)}</div></div><div class="conv"><div class="l">Tested win rate</div><div class="cv">${s ? Math.round(s.win * 100) + "%" : "–"}</div><div style="font:11px var(--mono);color:var(--mute)">${s ? `PF ${s.pf.toFixed(2)} · ${s.n} test trades` : ""}</div></div></div>
+    <div class="pgrid"><div><div class="l">Setup</div><div class="v" style="font-size:13px">${x.side > 0 ? "Stretched 2.5σ below" : "Stretched 2.5σ above"} its 20-day average${x.tier === "quiet" ? " in a quiet (low-ADX) market" : ""}</div><div class="s">signal on ${niceD(x.date)} close${x.bars ? ` · ${x.bars} day${x.bars > 1 ? "s" : ""} ago` : ""}</div></div>
+    <div><div class="l">Entry</div><div class="v">${px(entry)}</div><div class="s">now ${px(now)}${x.bars ? " · late entries get a worse price" : " · enter at market"}</div></div>
+    <div><div class="l">Stop</div><div class="v down">${px(entry - x.side * x.stopDist)}</div><div class="s">${pips(r, x.stopDist)} pips from your fill</div></div>
+    <div><div class="l">Target</div><div class="v up">${px(x.target)}</div><div class="s">${x.tier === "quiet" ? "half-way back to" : "back to"} the 20-day average</div></div>
+    <div><div class="l">Time limit</div><div class="v" style="font-size:13px">${x.daysLeft} day${x.daysLeft === 1 ? "" : "s"} left</div><div class="s">exit at market if neither is hit</div></div></div>
+    <div style="margin-top:10px">${MT.btn({ sym: r.sym, label: disp(r), cls: r._cls, side: x.side, stop: entry - x.side * x.stopDist, target: x.target, src: (x.tier === "quiet" ? "★ " : "") + "FX range reversion" })}</div>
+    <p class="note">Rule chosen on 2016–${Q ? Q.split.slice(0, 4) : "2021"} data and checked on ${Q ? Q.split.slice(0, 4) : "2021"}–2026 data it never saw, spreads included. Place the stop ${pips(r, x.stopDist)} pips from <b>your actual fill</b>. Expect losing streaks: even at ${s ? Math.round(s.win * 100) : 55}% wins, 4–5 losses in a row happen.</p></div>`;
+}
+function hqScore(r) { if (r._cls === "forex") { const x = FXA(r); return x ? x.side * ((x.tier === "quiet" ? 70 : 60) - x.bars) : null; } const x = HQ(r); return x ? x.side * (x.p * 100 - x.bars * 0.5) : null; }
 function hqCell(r) {
+  if (r._cls === "forex") return fxCell(r);
   const x = HQ(r);
   if (!x) return '<span class="mute tsl">—</span>';
   return `<span class="sigchip ${x.side > 0 ? "sb2" : "ss2"}" title="${x.name} on ${x.date}. Model confidence ${Math.round(x.p * 100)}%; signals at this confidence won ${x.exp ? Math.round(x.exp.win * 100) : "?"}% of the time on unseen data (target ${x.Rm}R vs stop).">★ ${x.side > 0 ? "BUY" : "SELL"}</span> <span class="tsl">${KIND_SHORT[x.kind] || x.kind} · ${x.exp ? Math.round(x.exp.win * 100) + "% tested win" : ""} · ${x.bars ? x.bars + "d" : "today"}</span>`;
 }
 function hqCard(r) {
+  if (r._cls === "forex") return fxCard(r);
   const x = HQ(r), Q = S.sig && S.sig.quality, px = fmt.px;
   if (!Q) return testedCard(r);
   if (!x) return `<div class="plan sn"><div class="l">★ High-quality signal (daily)</div><div class="big">NONE RIGHT NOW</div><p class="note" style="margin:6px 0 0">No signal on ${disp(r)} passes the quality model (cut-off ${Math.round(Q.threshold * 100)}% confidence). Only about 1 in 16 signals qualifies — waiting for one is part of the edge.</p></div>`;
@@ -450,7 +483,21 @@ function renderBestTested() {
   return `<section class="bs"><div class="bshead"><div><h2>★ Best tested signals now</h2><p class="note">Only signal types that made money in walk-forward testing (newer half of 5 years of data, 29 assets): trend flip with ½ off at 1R${T0.trail ? ` (PF ${T0.trail.pf.toFixed(2)}, ${Math.round(T0.trail.win * 100)}% wins)` : ""}, RSI(2) pullback with the market trend${T0.pullback ? ` (PF ${T0.pullback.pf.toFixed(2)}, ${Math.round(T0.pullback.win * 100)}% wins)` : ""}, and ★ Wyckoff events (${Object.entries(T0.wyckoff || {}).map(([k, v]) => `${k} ${v.pf.toFixed(2)}`).join(", ")}). Ranked by tested profit factor, then freshness.</p></div></div>
     <div class="bsgrid">${col(buys, "buy")}${col(sells, "sell")}</div></section>`;
 }
+function renderFxBoard() {
+  const Q = FXQ(), list = (S.data.classes.forex || []).map((r) => ({ r, x: FXA(r) })).filter((y) => y.x);
+  const item = ({ r, x }) => { const s = fxTierStat(x), entry = x.entry || r.price; return `<div class="pk" data-s="${r.sym}"><div class="pkrank ${x.side > 0 ? "rb" : "rs"}">${x.side > 0 ? "▲" : "▼"}</div><div class="pkmain">
+      <div class="pkline"><span class="sym">${disp(r)}</span><span class="chip ${x.side > 0 ? "g" : "r"}">${x.side > 0 ? "BUY" : "SELL"}</span>${x.tier === "quiet" ? `<span class="chip warn">★ high-accuracy</span>` : ""}<span class="pkname">${x.bars ? x.bars + "d ago · " + x.daysLeft + "d left" : "new today"}</span></div>
+      <div class="pkline mono"><span>entry ${fmt.px(entry)}</span><span class="down">stop ${pips(r, x.stopDist)} pips</span><span class="up">target ${fmt.px(x.target)}</span><span class="mute">now ${fmt.px(r.price)}</span></div></div>
+      <div class="pkscore"><div class="v ${x.side > 0 ? "up" : "down"}">${s ? Math.round(s.win * 100) + "%" : "–"}</div><div class="l">tested win · PF ${s ? s.pf.toFixed(2) : "–"}</div>${MT.openFor(r.sym).length ? `<span class="mtmine">● in my trades</span>` : MT.btn({ sym: r.sym, label: disp(r), cls: "forex", side: x.side, stop: entry - x.side * x.stopDist, target: x.target, src: (x.tier === "quiet" ? "★ " : "") + "FX range reversion" })}</div></div>`; };
+  const cmp = Q ? [["Range reversion (shown)", Q.all], ["…quiet-market tier ★", Q.quiet], ["Trend pullback (old)", Q.trendPullback], ["Trend flip", Q.trendFlip], ["Breakout", Q.breakout], ["1-hour trend dip", Q.intraday]].filter((y) => y[1]) : [];
+  return `<section class="bs"><div class="bshead"><div><h2>Forex — tested signals</h2>
+    <p class="note">One rule held up on forex in our walk-forward test across 11 pairs: when a pair is <b>stretched 2.5 standard deviations</b> from its 20-day average, fade it back toward the average (stop 1–1.5 × daily ATR, 5-day limit). ${Q && Q.all ? `On unseen data (${Q.split.slice(0, 4)}–2026, spreads included) it won <b>${Math.round(Q.all.win * 100)}%</b> of ${Q.all.n} trades, profit factor ${Q.all.pf.toFixed(2)}; in quiet markets (★) <b>${Math.round(Q.quiet.win * 100)}%</b>, PF ${Q.quiet.pf.toFixed(2)}.` : ""} Signals are rare — about one a week across all pairs. Gold is excluded (no tested edge). BUY = buy the first currency.</p></div>
+    <div class="bsctl"><div class="view" id="bsCls"><button data-c="forex" class="on">Forex</button><button data-c="crypto">Crypto</button></div></div></div>
+    <div class="fxgrid"><section class="pkcard"><div class="pkt"><h3>Active forex signals</h3><span>${list.length} now</span></div>${list.length ? list.map(item).join("") : `<p class="note">No pair is stretched enough right now. That is normal — wait for the next one rather than forcing a trade.</p>`}</section>
+    <section class="pkcard"><div class="pkt"><h3>What we tested on forex</h3><span>unseen data, spreads included</span></div><table class="fxcmp"><tr><th>Entry method</th><th>Win rate</th><th>Profit factor</th><th>Trades</th></tr>${cmp.map(([l, s]) => `<tr class="${s.pf >= 1.1 ? "" : "bad"}"><td>${l}</td><td>${Math.round(s.win * 100)}%</td><td class="${s.pf >= 1 ? "up" : "down"}">${s.pf.toFixed(2)}</td><td>${s.n}</td></tr>`).join("")}</table><p class="note">Trend-following entries (like the old forex picks) lost money on forex in the recent five years, so they are no longer shown for forex pairs.</p></section></div></section>`;
+}
 function renderBuySell() {
+  if (PK.bsCls === "forex" && S.sig && S.sig.fx) return renderFxBoard();
   const H = HORIZONS.find((x) => x.id === PK.bsH);
   const classes = [PK.bsCls];
   const buys = sidePicks(classes, H, "buy"), sells = sidePicks(classes, H, "sell");
@@ -480,7 +527,7 @@ function renderPicks() {
   $("pkUni").onchange = (e) => { PK.universe = e.target.value; renderPicks(); };
   const tt = $("toTrack"); if (tt) tt.onclick = (e) => { e.preventDefault(); document.querySelector('#tabs button[data-cls="track"]').click(); };
   $("bsCls").onclick = (e) => { const c = e.target.dataset.c; if (c) { PK.bsCls = c; renderPicks(); } };
-  $("bsH").onclick = (e) => { const x = e.target.dataset.h; if (x) { PK.bsH = x; renderPicks(); } };
+  if ($("bsH")) $("bsH").onclick = (e) => { const x = e.target.dataset.h; if (x) { PK.bsH = x; renderPicks(); } };
   $("picks").querySelectorAll(".pk").forEach((el) => (el.onclick = () => openDetail(el.dataset.s)));
 }
 
@@ -886,6 +933,8 @@ window.addEventListener("resize", () => { TV.charts.forEach((c) => c.applyOption
 
 /* ---------------- method page ---------------- */
 const METHOD = `
+<h2>Forex signals</h2>
+<p>Forex has its own entry rule, chosen in a separate forex lab (12 pairs + gold, 10 years of daily and 2 years of hourly data, spreads included). Eight families of entries were tested — trend pullbacks, trend flips, breakouts, momentum, London-session breakouts, hourly dips and hourly/daily mean reversion. Settings were picked on the older half and judged only on the newer half. Every trend-following entry lost money on forex in the newer half; the only rule that held up is <b>daily range reversion</b>: fade a close 2.5 standard deviations away from the 20-day average, stop 1 × ATR (1.5 × ATR and a half-way target when the market is quiet, ADX&nbsp;&lt;&nbsp;20), exit after 5 days if neither stop nor target is hit. Gold trends rather than reverts, so it gets no signal. The lab re-runs weekly and every forex signal is logged in the Track record.</p>
 <h2>How the forecast and signals work</h2>
 <p>The forecast is built the way a systematic (quant) desk would build one: a single model per asset group, trained on 5 years of daily data across every asset in the group, and judged only on data it has never seen.</p>
 <table><tr><th>Step</th><th>What happens</th></tr>
