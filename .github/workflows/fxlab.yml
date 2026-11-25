@@ -1,0 +1,38 @@
+name: Forex lab
+
+# Walk-forward test of forex-specific entry methods (12 pairs + gold). Writes multi/data/fxlab.json.
+on:
+  push:
+    branches: [main]
+    paths: ["multi/scripts/fxlab.mjs", "multi/scripts/fx_data.py", "multi/fxmethods.js", ".github/workflows/fxlab.yml"]
+  schedule:
+    - cron: "41 3 * * 0"   # weekly
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: pip install -r requirements.txt
+      - run: python multi/scripts/fx_data.py /tmp/fx
+      - run: node multi/scripts/fxlab.mjs /tmp/fx multi/data/fxlab.json | tee /tmp/fxlab.log
+      - name: Save report
+        run: |
+          cp /tmp/fxlab.log multi/data/fxlab.log
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add multi/data/fxlab.json multi/data/fxlab.log
+          git diff --cached --quiet || git commit -m "Forex lab report $(date -u +%F)"
+          for i in 1 2 3; do git pull --rebase -q origin main && git push && break; sleep 5; done

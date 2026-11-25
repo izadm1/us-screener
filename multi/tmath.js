@@ -184,3 +184,5 @@ function metaFeat(ctx, k) {
 }
 function metaProb(m, f) { let z = m.coef[0]; for (let j = 0; j < f.length; j++) z += m.coef[j + 1] * ((f[j] - m.mean[j]) / (m.std[j] || 1)); return 1 / (1 + Math.exp(-z)); }
 if (typeof module !== 'undefined') Object.assign(module.exports, { META_FEATS, metaPrep, metaCands, metaFeat, metaProb });
+
+if (typeof window !== 'undefined') window.TMX = { emaA, wild, atrA, rsiA, stA, adxA, erA };
