@@ -197,7 +197,7 @@ function planCard(r, plan) {
     if (plan.obstacle) h += `<p class="note">⚠ ${plan.dir === 1 ? "Resistance" : "Support"} at ${px(plan.obstacle)} sits before Target 1 — expect a reaction there.</p>`;
     if (plan.targets[0].R < 1) h += `<p class="note">⚠ Base-case target is only ${plan.targets[0].R.toFixed(1)}R — better to enter near the ${plan.dir === 1 ? "bottom" : "top"} of the zone, or use a later target date.</p>`;
   } else {
-    h += `<p class="note" style="margin:8px 0 0">No trade: the odds and the trend don't line up. Watch for a close above <b>${px(plan.waitLong)}</b> (bullish trigger) or below <b>${px(plan.waitShort)}</b> (bearish trigger).</p>`;
+    h += r._cls === "forex" ? `<p class="note" style="margin:8px 0 0">Forecast only — not an entry. For forex, trade only the tested range-reversion signal shown above.</p>` : `<p class="note" style="margin:8px 0 0">No trade: the odds and the trend don't line up. Watch for a close above <b>${px(plan.waitLong)}</b> (bullish trigger) or below <b>${px(plan.waitShort)}</b> (bearish trigger).</p>`;
   }
   h += `<ul class="why">${plan.why.map((w) => `<li>${w}</li>`).join("")}</ul></div>`;
   return h;
