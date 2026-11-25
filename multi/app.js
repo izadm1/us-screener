@@ -35,6 +35,7 @@ function hqCard(r) {
   return `<div class="plan ${x.side > 0 ? "sb2" : "ss2"}"><div class="planhead"><div><div class="l">★ High-quality signal (daily)</div><div class="big">${x.side > 0 ? "BUY" : "SELL"}</div></div><div class="conv"><div class="l">Tested win rate at this confidence</div><div class="cv">${x.exp ? Math.round(x.exp.win * 100) + "%" : "–"}</div><div style="font:11px var(--mono);color:var(--mute)">model confidence ${Math.round(x.p * 100)}%${x.exp ? ` · ${x.exp.n} test trades` : ""}</div></div></div>
     <div class="pgrid"><div><div class="l">Trigger</div><div class="v" style="font-size:13px">${x.name}</div><div class="s">${niceD(x.date)} · ${x.bars ? x.bars + " days ago" : "today"}</div></div><div><div class="l">Entry</div><div class="v">${px(x.price)}</div><div class="s">now ${px(x.now)} (${fmt.pct(x.move, 2)})</div></div>
     <div><div class="l">Stop</div><div class="v down">${px(x.stop)}</div><div class="s">risk ${fmt.pct(x.risk, 2)}</div></div><div><div class="l">Target (${x.Rm}R)</div><div class="v up">${px(x.target)}</div><div class="s">${fmt.pct(x.side * (x.target / x.price - 1), 2)}</div></div><div><div class="l">Time limit</div><div class="v" style="font-size:13px">${Q.H} trading days</div><div class="s">exit at market if neither is hit</div></div></div>
+    <div style="margin-top:10px">${MT.btn({ sym: r.sym, label: disp(r), cls: r._cls, side: x.side, stop: x.stop, target: x.target, src: "★ HQ " + (KIND_SHORT[x.kind] || x.kind) + " " + Math.round(x.p * 100) + "%" })}</div>
     <p class="note">Quality model trained on ${Q.samples.toLocaleString()} past signals from ${Q.assets} assets; on unseen data after ${Q.split} its picks won ${Math.round(Q.test.win * 100)}% (profit factor ${Q.test.pf.toFixed(2)}, ${Q.test.n} trades) versus ${Math.round(Q.testBase.win * 100)}% for all signals. Costs included. Track live results in the Track record tab.</p></div>`;
 }
 function tsScore(r) { const g = SG(r); if (!g || !g.best) return g && g.trail ? g.trail.dir * 0.01 : null; const x = g.best; return x.side * (x.pf * 10 + x.win * 5 - x.bars * 0.3); }
@@ -280,9 +281,10 @@ $("tabs").onclick = (e) => {
   const b = e.target.closest("button"); if (!b) return;
   [...$("tabs").children].forEach((x) => x.classList.toggle("on", x === b));
   S.cls = b.dataset.cls;
-  const m = S.cls === "method", pk = S.cls === "picks", tk = S.cls === "track";
-  $("screen").hidden = m || pk || tk; $("method").hidden = !m; $("picks").hidden = !pk; $("track").hidden = !tk;
+  const m = S.cls === "method", pk = S.cls === "picks", tk = S.cls === "track", mn = S.cls === "mine";
+  $("screen").hidden = m || pk || tk || mn; $("method").hidden = !m; $("picks").hidden = !pk; $("track").hidden = !tk; $("mine").hidden = !mn;
   if (tk) { renderTrack(); return; }
+  if (mn) { $("regime").hidden = false; MT.render($("mine")); return; }
   $("regime").hidden = m;
   if (m) { $("method").innerHTML = METHOD; return; }
   if (pk) { renderPicks(); return; }
@@ -426,7 +428,7 @@ function renderHQ() {
   const item = ({ r, x }, i) => `<div class="pk" data-s="${r.sym}"><div class="pkrank ${x.side > 0 ? "rb" : "rs"}">${i + 1}</div><div class="pkmain">
       <div class="pkline"><span class="sym">${disp(r)}</span><span class="chip">${clsLabel[r._cls]}</span><span class="chip ${x.side > 0 ? "g" : "r"}">${x.side > 0 ? "BUY" : "SELL"} · ${KIND_SHORT[x.kind] || x.kind}</span><span class="pkname">${x.bars ? x.bars + "d ago" : "today"}</span></div>
       <div class="pkline mono"><span>entry ${fmt.px(x.price)}</span><span class="down">stop ${fmt.px(x.stop)}</span><span class="up">target ${fmt.px(x.target)}</span><span class="mute">now ${fmt.pct(x.move, 1)}</span></div></div>
-      <div class="pkscore"><div class="v ${x.side > 0 ? "up" : "down"}">${x.exp ? Math.round(x.exp.win * 100) + "%" : "–"}</div><div class="l">tested win · conf ${Math.round(x.p * 100)}%</div></div></div>`;
+      <div class="pkscore"><div class="v ${x.side > 0 ? "up" : "down"}">${x.exp ? Math.round(x.exp.win * 100) + "%" : "–"}</div><div class="l">tested win · conf ${Math.round(x.p * 100)}%</div>${MT.openFor(r.sym).length ? `<span class="mtmine">● in my trades</span>` : MT.btn({ sym: r.sym, label: disp(r), cls: r._cls, side: x.side, stop: x.stop, target: x.target, src: "★ HQ " + (KIND_SHORT[x.kind] || x.kind) + " " + Math.round(x.p * 100) + "%" })}</div></div>`;
   const buys = rows.filter((y) => y.x.side > 0), sells = rows.filter((y) => y.x.side < 0);
   const col = (list, side) => `<section class="pkcard ${side}"><div class="pkt"><h3>${side === "buy" ? "▲ High-quality BUYs" : "▼ High-quality SELLs"}</h3><span>${list.length} now</span></div>${list.length ? list.slice(0, 12).map(item).join("") : `<p class="note">None right now. High-quality signals are rare by design (about 1 in 16 signals qualifies).</p>`}</section>`;
   return `<section class="bs"><div class="bshead"><div><h2>★ High-quality signals</h2><p class="note">Every signal (trend flips, pullbacks, Wyckoff events) is scored by a quality model trained on ${Q.samples.toLocaleString()} past signals from ${Q.assets} assets. Only those above ${Math.round(Q.threshold * 100)}% confidence are shown. On unseen data (after ${Q.split}), these won <b>${Math.round(Q.test.win * 100)}%</b> of trades (profit factor ${Q.test.pf.toFixed(2)}, ${Q.test.n} trades, costs included) versus ${Math.round(Q.testBase.win * 100)}% for all signals. Each trade: entry at the signal, stop at its invalidation, target ${Q.Rm}R, ${Q.H}-day time limit. <a href="#" id="toTrack">See the live track record →</a></p></div></div>
@@ -498,8 +500,8 @@ async function renderTrack() {
   const row = (x) => { const r = findRow(x.sym); return `<tr data-s="${x.sym}"><td><b>${x.label || x.sym}</b> <span class="mute">${x.cls}</span></td><td class="${x.side > 0 ? "up" : "down"}">${x.side > 0 ? "BUY" : "SELL"}</td><td>${KIND_SHORT[x.kind] || x.kind}</td><td>${x.logged.slice(0, 16).replace("T", " ")}</td><td>${fmt.px(x.entry)}</td><td class="down">${fmt.px(x.stop)}</td><td class="up">${fmt.px(x.target)}</td><td>${Math.round(x.p * 100)}%</td>${x.status === "open" ? `<td class="${(x.openR || 0) >= 0 ? "up" : "down"}">${(x.openR || 0) >= 0 ? "+" : ""}${(x.openR || 0).toFixed(2)}R open</td>` : `<td class="${x.status === "win" ? "up" : "down"}"><b>${x.status.toUpperCase()}</b> ${x.R >= 0 ? "+" : ""}${x.R.toFixed(2)}R${x.expired ? " (time)" : ""} · ${x.exitDate}</td>`}</tr>`; };
   const tbl = (list) => `<div class="tablewrap"><table class="trk"><thead><tr><th>Asset</th><th>Side</th><th>Signal</th><th>Logged (UTC)</th><th>Entry</th><th>Stop</th><th>Target</th><th>Conf.</th><th>Result</th></tr></thead><tbody>${list.map(row).join("")}</tbody></table></div>`;
   S.trackOpen = open.map((x) => x.sym); S.trackAt = Date.now();
-  const orow = (x) => `<tr data-s="${x.sym}" data-id="${x.id}" class="tlive"><td><b>${x.label || x.sym}</b> <span class="mute">${x.cls}</span><div class="mute" style="font-size:11px">${KIND_SHORT[x.kind] || x.kind} · ${Math.round(x.p * 100)}% conf.</div></td><td class="${x.side > 0 ? "up" : "down"}"><b>${x.side > 0 ? "BUY" : "SELL"}</b></td><td>${x.logged.slice(0, 16).replace("T", " ")}</td><td>${fmt.px(x.entry)}</td><td class="lpx"></td><td class="down">${fmt.px(x.stop)}</td><td class="up">${fmt.px(x.target)}</td><td class="lbar"></td><td class="lpl"></td><td class="lnote"></td></tr>`;
-  const otbl = `<div class="tablewrap"><table class="trk"><thead><tr><th>Asset</th><th>Side</th><th>Logged (UTC)</th><th>Entry</th><th>Live price</th><th>Stop</th><th>Target</th><th>Stop ◂ progress ▸ Target</th><th>Live P/L</th><th>Status</th></tr></thead><tbody>${open.map(orow).join("")}</tbody></table></div>`;
+  const orow = (x) => `<tr data-s="${x.sym}" data-id="${x.id}" class="tlive"><td><b>${x.label || x.sym}</b> <span class="mute">${x.cls}</span><div class="mute" style="font-size:11px">${KIND_SHORT[x.kind] || x.kind} · ${Math.round(x.p * 100)}% conf.</div></td><td class="${x.side > 0 ? "up" : "down"}"><b>${x.side > 0 ? "BUY" : "SELL"}</b></td><td>${x.logged.slice(0, 16).replace("T", " ")}</td><td>${fmt.px(x.entry)}</td><td class="lpx"></td><td class="down">${fmt.px(x.stop)}</td><td class="up">${fmt.px(x.target)}</td><td class="lbar"></td><td class="lpl"></td><td class="lnote"></td><td>${MT.openFor(x.sym).length ? `<span class="mtmine">● mine</span>` : MT.btn({ sym: x.sym, label: x.label || x.sym, cls: x.cls, side: x.side, stop: x.stop, target: x.target, src: "★ HQ " + (KIND_SHORT[x.kind] || x.kind) }, "+ I took it")}</td></tr>`;
+  const otbl = `<div class="tablewrap"><table class="trk"><thead><tr><th>Asset</th><th>Side</th><th>Logged (UTC)</th><th>Entry</th><th>Live price</th><th>Stop</th><th>Target</th><th>Stop ◂ progress ▸ Target</th><th>Live P/L</th><th>Status</th><th></th></tr></thead><tbody>${open.map(orow).join("")}</tbody></table></div>`;
   S.trackData = T;
   el.innerHTML = `<h2>Live track record</h2>
     <p class="note">Every ★ high-quality signal is logged automatically when it first appears, at the live price at that moment — no hindsight. It is closed as a <b>win</b> at its target, a <b>loss</b> at its stop (if both are hit the same day it counts as a loss), or at market after ${Q ? Q.H : 20} trading days. Results are in R (1R = the amount risked) and include trading costs. Recording since ${T.started.slice(0, 10)}.</p>
@@ -551,7 +553,7 @@ async function openDetail(sym, keepScroll) {
   $("dHead").innerHTML = `<div class="dh"><h2>${disp(r)} <span class="px">${fmt.px(r.price)}</span> <span class="${cls(r.chg1d)}" style="font:500 15px var(--mono)">${fmt.pct(r.chg1d, 2)}</span></h2>
     <p>${r.name || ""}${r.sector ? " · " + r.sector : ""} · bar date ${r.date}</p>
     <div class="chips">${(r.signals || []).map((s) => `<span class="chip ${chipColor[s] || ""}">${s}</span>`).join("")}</div>
-    <a class="termbtn" href="terminal.html?s=${encodeURIComponent(r.sym)}&tf=1D">▶ Open in Terminal</a>
+    <a class="termbtn" href="terminal.html?s=${encodeURIComponent(r.sym)}&tf=1D">▶ Open in Terminal</a> ${MT.btn({ sym: r.sym, label: disp(r), cls: r._cls, side: 1 }, "+ Record a trade")}${MT.openFor(r.sym).length ? ` <a class="mtmine" href="?tab=mine">● ${MT.openFor(r.sym).length} open in my trades</a>` : ""}
     <div class="buckets"><div class="bk"><div class="l">Composite</div><div class="v">${r.score == null ? "–" : r.score.toFixed(0)}</div></div>
     ${bk("trend", "Trend")}${bk("momentum", "Momentum")}${bk("relstr", "Rel. strength")}${bk("volume", "Volume")}${bk("timing", "Entry timing")}${bk("quality", "Quality")}</div>
     <div class="legend"><span style="--c:#f2b33d">EMA 20</span><span style="--c:#5b8cff">EMA 50</span><span style="--c:#9b7bff">EMA 200</span><span style="--c:#22c38e">ATR trail (up)</span><span style="--c:#f0565b">ATR trail (down)</span><span style="--c:#e6e9ef">Forecast median</span><span style="--c:#5b8cff">80% range</span></div></div>`;
@@ -948,3 +950,8 @@ checkBuild();
 setInterval(checkBuild, 15 * 60 * 1000);
 { const m = location.search.match(/[?&]tab=(\w+)/) || location.hash.match(/^#(\w+)$/); if (m) setTimeout(() => { const btn = document.querySelector(`#tabs button[data-cls="${m[1]}"]`); if (btn) btn.click(); }, 300); }
 load();
+
+/* ---------------- My trades wiring ---------------- */
+MT.priceFn = (sym) => { if (!S.data) return null; const r = findRow(sym); return r ? r.price : null; };
+MT.symbolsFn = () => (S.data ? Object.entries(S.data.classes).flatMap(([c, l]) => l.map((r) => ({ sym: r.sym, label: disp(r), name: r.name, cls: c }))) : []);
+MT.onChange = () => { if (!$("mine").hidden) MT.render($("mine")); else if (!$("picks").hidden) renderPicks(); else if (!$("track").hidden) renderTrack(); if (!$("drawer").hidden && S.openSym) openDetail(S.openSym, true); };

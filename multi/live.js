@@ -148,6 +148,7 @@ function wantedFh() {
   const add = (r) => { if (r && ["stocks", "etfs", "forex"].includes(r._cls) && want.length < 50 && !want.includes(fhSym(r))) want.push(fhSym(r)); };
   const m = bySym();
   if (S.openSym) add(m[S.openSym]);
+  MT.list("open").forEach((t) => add(m[t.sym])); // my own trades first
   (S.trackOpen || []).forEach((s) => add(m[s])); // open track-record trades always get live prices
   if (S.sig && S.sig.assets) Object.entries(S.sig.assets).forEach(([s, v]) => v && v.hq && add(m[s]));
   if (TV && TV.sym) add(m[TV.sym]);
@@ -208,6 +209,7 @@ function openKeyBox() {
 let lastDeep = 0;
 setInterval(() => {
   liveBadge();
+  if (S.data) { if (!$("mine").hidden) MT.updLive($("mine")); else MT.checkAlerts(); }
   if (S.data && !$("track").hidden) { if (Date.now() - (S.trackAt || 0) > 5 * 60 * 1000) renderTrack(); else updTrackLive(); }
   if (!LIVE.dirty || !S.data) return;
   LIVE.dirty = false;

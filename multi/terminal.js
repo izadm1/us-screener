@@ -270,6 +270,11 @@ function draw() {
     LV.res.forEach((l, i) => cs.createPriceLine({ price: l.p, color: "rgba(240,86,91,.5)", lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: `R${i + 1}` }));
     LV.sup.forEach((l, i) => cs.createPriceLine({ price: l.p, color: "rgba(34,195,142,.5)", lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: `S${i + 1}` }));
   }
+  MT.openFor(r.sym).forEach((t) => {
+    cs.createPriceLine({ price: t.entry, color: "#e6e9ef", lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: `MY ${t.side > 0 ? "BUY" : "SELL"}` });
+    if (t.stop) cs.createPriceLine({ price: t.stop, color: "#ff4d6d", lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: "MY STOP" });
+    if (t.target) cs.createPriceLine({ price: t.target, color: "#00ffb3", lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: "MY TARGET" });
+  });
   if (r.fc && T.tog.fc) { const p = planNow(); if (p && p.dir) { cs.createPriceLine({ price: p.stop, color: "#f0565b", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "STOP" }); p.targets.forEach((t, i) => cs.createPriceLine({ price: t.price, color: "#22c38e", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: `T${i + 1}` })); } }
   const AC = accFor(T.tf);
   if (T.tog.sig && CFG.pb && AC && AC.pb) leg.push(["#7fd3ff", `BUY/SELL PB = RSI(2) pullback in trend + market regime — tested: ${Math.round(AC.pb.valid.win * 100)}% wins, profit factor ${AC.pb.valid.pf.toFixed(2)}`]);
@@ -353,7 +358,16 @@ function hqTermCard() {
   if (!live.length) return `<div class="plan sn"><div class="l">★★ High-quality signal (quality model · daily)</div><div class="big">NONE RIGHT NOW</div><p class="note" style="margin:6px 0 0">No signal on this asset passes the quality model (≥ ${Math.round(Mo.threshold * 100)}% confidence). On unseen data the model's picks won ${Math.round(Mo.test.win * 100)}% vs ${Math.round(Mo.testBase.win * 100)}% for all signals.</p></div>`;
   const x = live[0], w = winAt(x.p), name = x.kind === "TRAIL" ? "Trend flip" : x.kind === "PULLBACK" ? "RSI(2) pullback" : `Wyckoff ${x.kind}`;
   return `<div class="plan ${x.side > 0 ? "sb2" : "ss2"}"><div class="planhead"><div><div class="l">★★ High-quality signal · daily</div><div class="big">${x.side > 0 ? "BUY" : "SELL"}</div></div><div class="conv"><div class="l">Tested win rate</div><div class="cv">${w != null ? Math.round(w * 100) + "%" : "–"}</div><div style="font:11px var(--mono);color:var(--mute)">confidence ${Math.round(x.p * 100)}%</div></div></div>
+    ${MT.btn({ sym: T.r.sym, label: disp(T.r), cls: T.r._cls, side: x.side, stop: x.stop, target: x.tgt, src: "★★ HQ " + name + " " + Math.round(x.p * 100) + "%" })}
     <div class="pgrid"><div><div class="l">Trigger</div><div class="v" style="font-size:13px">${name}</div><div class="s">${fmtT(b[x.i].t)}</div></div><div><div class="l">Entry</div><div class="v">${fmt.px(x.e)}</div><div class="s">now ${fmt.px(b[n - 1].c)}</div></div><div><div class="l">Stop</div><div class="v down">${fmt.px(x.stop)}</div></div><div><div class="l">Target (${Mo.Rm}R)</div><div class="v up">${fmt.px(x.tgt)}</div></div><div><div class="l">Time limit</div><div class="v" style="font-size:13px">${Mo.H} days</div></div></div></div>`;
+}
+function myPosCard() {
+  const r = T.r, mine = MT.openFor(r.sym);
+  if (!mine.length) return `<div class="mypos none"><span class="mute">Took a trade on ${disp(r)} elsewhere?</span> ${MT.btn({ sym: r.sym, label: disp(r), cls: r._cls, side: 1 }, "+ Record a trade")}</div>`;
+  return mine.map((t) => { const c = MT.calc(t, MT.price(t)); return `<div class="mypos ${c.move >= 0 ? "g" : "r"}"><div class="l">My position · ${t.side > 0 ? "BUY" : "SELL"}${t.platform ? " · " + t.platform : ""}</div>
+    <div class="mprow"><span>entry <b>${fmt.px(t.entry)}</b></span>${t.qty != null ? `<span>qty <b>${t.qty}</b></span>` : ""}${t.stop ? `<span class="down">stop ${fmt.px(t.stop)}</span>` : ""}${t.target ? `<span class="up">target ${fmt.px(t.target)}</span>` : ""}</div>
+    ${c.exit ? `<div class="mprow big2"><b class="${c.move >= 0 ? "up" : "down"}">${c.pct >= 0 ? "+" : ""}${(c.pct * 100).toFixed(2)}%</b>${c.R != null ? `<b class="${c.R >= 0 ? "up" : "down"}">${c.R >= 0 ? "+" : ""}${c.R.toFixed(2)}R</b>` : ""}${c.money != null ? `<b class="${c.money >= 0 ? "up" : "down"}">${c.money >= 0 ? "+" : ""}${fmt.px(c.money)}</b>` : ""}${c.state === "target" ? `<span class="chip g">🎯 Target reached</span>` : c.state === "stop" ? `<span class="chip r">✕ Stop reached</span>` : ""}</div>` : ""}
+    <div class="mprow"><a href="index.html?tab=mine">Manage in My trades →</a></div></div>`; }).join("");
 }
 function bestCard() {
   const r = T.r, B = bestSignal(), b = T.bars, x = B.best;
@@ -445,7 +459,7 @@ function subs() {
   if (!T.ws || T.ws.readyState !== 1) return;
   const want = new Set();
   const add = (r) => { if (r && ["stocks", "etfs", "forex"].includes(r._cls) && want.size < 50) want.add(fhSym(r)); };
-  add(T.r); T.wl.forEach((s) => add(row(s))); T.alerts.filter((a) => !a.done).forEach((a) => add(row(a.sym)));
+  add(T.r); MT.list("open").forEach((t) => add(row(t.sym))); T.wl.forEach((s) => add(row(s))); T.alerts.filter((a) => !a.done).forEach((a) => add(row(a.sym)));
   T.wsSubs.forEach((s) => { if (!want.has(s)) { T.ws.send(JSON.stringify({ type: "unsubscribe", symbol: s })); T.wsSubs.delete(s); } });
   want.forEach((s) => { if (!T.wsSubs.has(s)) { T.ws.send(JSON.stringify({ type: "subscribe", symbol: s })); T.wsSubs.add(s); } });
 }
@@ -475,7 +489,7 @@ function side(light) {
   if (T.tab === "signal") {
     if (!r.fc) { B.innerHTML = `<p class="note">No model forecast for this asset.</p>`; return; }
     const p = planNow();
-    B.innerHTML = hqTermCard() + bestCard() + wyCard() + `<h4>Model trade plan</h4><div class="hzsel" id="hz">${[[5, "1W"], [21, "1M"], [63, "3M"], [126, "6M"]].map(([h, l]) => `<button data-h="${h}" class="${h === T.hz ? "on" : ""}">${l}</button>`).join("")}</div>${planCard(r, p)}
+    B.innerHTML = myPosCard() + hqTermCard() + bestCard() + wyCard() + `<h4>Model trade plan</h4><div class="hzsel" id="hz">${[[5, "1W"], [21, "1M"], [63, "3M"], [126, "6M"]].map(([h, l]) => `<button data-h="${h}" class="${h === T.hz ? "on" : ""}">${l}</button>`).join("")}</div>${planCard(r, p)}
       <h4>Key levels (${T.tf})</h4>${(T.LV ? T.LV.res.slice().reverse().map((l, i) => `<div class="alrow"><span>Resistance · ${l.n} touch${l.n > 1 ? "es" : ""}</span><span class="down">${fmt.px(l.p)}</span></div>`).join("") + `<div class="alrow"><span><b>Price</b></span><b>${fmt.px(T.price)}</b></div>` + T.LV.sup.map((l) => `<div class="alrow"><span>Support · ${l.n} touch${l.n > 1 ? "es" : ""}</span><span class="up">${fmt.px(l.p)}</span></div>`).join("") : "")}`;
     B.querySelectorAll("#hz button").forEach((x) => (x.onclick = () => { T.hz = +x.dataset.h; side(); draw(); }));
     return;
@@ -648,3 +662,9 @@ async function boot() {
   setInterval(async () => { try { const t = await (await fetch("terminal.html?ts=" + Date.now(), { cache: "no-store" })).text(); const m = t.match(/<meta name="build" content="([^"]+)"/), mine = document.querySelector('meta[name="build"]').content; if (m && m[1] !== mine && !/__V__/.test(m[1])) location.replace(location.pathname + `?s=${encodeURIComponent(T.r.sym)}&tf=${T.tf}&v=${m[1]}`); } catch (e) {} }, 10 * 60 * 1000);
 }
 boot();
+
+/* ---------------- My trades wiring ---------------- */
+MT.priceFn = (sym) => { const lp = T.prices && T.prices[sym]; if (lp && lp.p > 0) return lp.p; if (T.r && sym === T.r.sym && T.bars && T.bars.length) return T.bars[T.bars.length - 1].c; const x = typeof row === "function" ? row(sym) : null; return x ? x.price : null; };
+MT.symbolsFn = () => all().map((r) => ({ sym: r.sym, label: disp(r), name: r.name, cls: r._cls }));
+MT.onChange = () => { if (T.r) { draw(); if (T.tab === "signal") side(); } };
+setInterval(() => { if (T.r) { MT.checkAlerts(); if (T.tab === "signal" && MT.openFor(T.r.sym).length) { const el = document.querySelector(".mypos"); if (el) { const B = document.createElement("div"); B.innerHTML = myPosCard(); document.querySelectorAll(".mypos").forEach((x, i) => { if (B.children[i]) x.replaceWith(B.children[i].cloneNode(true)); }); } } } }, 3000);

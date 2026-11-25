@@ -210,3 +210,40 @@ table.trk{min-width:900px}
 .ldot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#555e6e;vertical-align:middle}.ldot.on{background:#22c38e;box-shadow:0 0 6px #22c38e}
 .chip.g{background:rgba(34,195,142,.15);color:#22c38e}.chip.r{background:rgba(240,86,91,.15);color:#f0565b}.chip.warn{background:rgba(242,179,61,.15);color:#f2b33d}
 table.trk{min-width:1050px}
+
+/* ---- My trades ---- */
+.mineTab{color:#ffd36b!important}
+.mtrec{background:rgba(91,140,255,.14);border:1px solid rgba(91,140,255,.45);color:#9db8ff;border-radius:6px;padding:4px 9px;font-size:12px;font-weight:600;white-space:nowrap;margin-top:6px}
+.mtrec:hover{background:rgba(91,140,255,.28);color:#fff}
+.mtmine{display:inline-block;margin-top:6px;font-size:11px;color:#ffd36b;text-decoration:none;white-space:nowrap}
+.mttop{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap}
+.mtacts{display:flex;gap:6px;flex-wrap:wrap}
+.mtacts button,.mtbtns button,.mtrow button{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 11px;font-size:12.5px}
+.mtrow{white-space:nowrap}.mtrow button{padding:4px 8px;margin-left:3px}
+.mtprimary{background:var(--acc)!important;border-color:var(--acc)!important;color:#fff;font-weight:600}
+table.mtt{min-width:1150px}
+.mtmodal{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;display:flex;align-items:center;justify-content:center;padding:14px}
+.mtbox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;width:min(520px,100%);max-height:92vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.mthead{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:16px}
+.mtx{background:none;border:0;font-size:18px;color:var(--mute)}
+.mtgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.mtgrid label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--mute)}
+.mtgrid .full{grid-column:1/-1}
+.mtgrid input{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 9px;color:var(--text);font:14px var(--mono);width:100%}
+.mtgrid .hint{font-size:11px}.mtgrid .hint a{color:var(--acc)}
+.mtside{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mtside button{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:9px;font-weight:600;color:var(--mute)}
+.mtside button.on.b{background:rgba(34,195,142,.18);border-color:#22c38e;color:#22c38e}
+.mtside button.on.s{background:rgba(240,86,91,.18);border-color:#f0565b;color:#f0565b}
+.mtrisk{min-height:20px;margin:10px 0;font-size:12.5px;color:var(--mute)}
+.mtbtns{display:flex;gap:8px;justify-content:flex-end}
+#mtToasts{position:fixed;right:16px;bottom:16px;z-index:120;display:flex;flex-direction:column;gap:8px;max-width:min(420px,92vw)}
+.mttoast{background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--acc);border-radius:8px;padding:10px 12px;font-size:13px;box-shadow:0 8px 30px rgba(0,0,0,.4)}
+.mttoast.g{border-left-color:#22c38e}.mttoast.r{border-left-color:#f0565b}.mttoast a{color:var(--acc)}
+.mypos{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:13px}
+.mypos.none{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}.mypos.none .mtrec{margin:0}
+.mypos.g{border-color:rgba(34,195,142,.5)}.mypos.r{border-color:rgba(240,86,91,.5)}
+.mypos .l{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#ffd36b;margin-bottom:6px}
+.mprow{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:4px 0;font-family:var(--mono)}.mprow a{color:var(--acc);font-family:var(--sans);font-size:12px}
+.mprow.big2 b{font-size:17px}
+@media(max-width:600px){.mtgrid{grid-template-columns:1fr}}
