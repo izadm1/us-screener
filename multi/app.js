@@ -941,7 +941,7 @@ async function checkBuild() {
     const mine = document.querySelector('meta[name="build"]')?.content;
     const txt = await (await fetch("index.html?ts=" + Date.now(), { cache: "no-store" })).text();
     const m = txt.match(/<meta name="build" content="([^"]+)"/);
-    if (m && mine && m[1] !== mine && !/__V__/.test(m[1])) location.replace(location.pathname + "?v=" + m[1] + location.hash);
+    if (m && mine && m[1] !== mine && !/__V__/.test(m[1])) { const q = new URLSearchParams(location.search); q.set("v", m[1]); location.replace(location.pathname + "?" + q + location.hash); };
   } catch (e) { /* offline: keep current */ }
 }
 checkBuild();
