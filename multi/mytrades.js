@@ -6,6 +6,7 @@
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const px = (v) => (typeof fmt !== "undefined" ? fmt.px(v) : (+v).toFixed(4));
   const num = (v) => { const n = parseFloat(String(v).replace(/,/g, "")); return isFinite(n) ? n : null; };
+  const rp = (v) => (v == null ? "" : +(+v).toFixed(Math.abs(v) >= 20 ? 2 : Math.abs(v) >= 1 ? 4 : 6));
   const ccy = (t) => (t.cls === "forex" ? (t.label || "").split("/")[1] || "" : t.sym.endsWith(".KL") ? "MYR" : "USD");
 
   const MT = {
@@ -81,10 +82,10 @@
         <label class="full">Asset <input id="mfSym" list="mfSyms" value="${esc(t.label || t.sym)}" placeholder="e.g. NVDA, BTC-USD, EUR/USD" ${ed || opts.sym ? "readonly" : ""}></label>
         <datalist id="mfSyms">${syms.map((s) => `<option value="${esc(s.label)}">${esc(s.name || "")}</option>`).join("")}</datalist>
         <div class="full mtside"><button data-side="1" class="${t.side > 0 ? "on b" : ""}">BUY / long</button><button data-side="-1" class="${t.side < 0 ? "on s" : ""}">SELL / short</button></div>
-        <label>Entry price <input id="mfEntry" inputmode="decimal" value="${t.entry != null ? t.entry : live != null ? +live.toPrecision(8) : ""}"><span class="hint">${live != null ? `live now ${px(live)}` : ""}</span></label>
+        <label>Entry price <input id="mfEntry" inputmode="decimal" value="${t.entry != null ? t.entry : live != null ? rp(live) : ""}"><span class="hint">${live != null ? `live now ${px(live)}` : ""}</span></label>
         <label>Quantity <input id="mfQty" inputmode="decimal" value="${t.qty != null ? t.qty : ""}" placeholder="shares / coins / units"></label>
-        <label>Stop loss <input id="mfStop" inputmode="decimal" value="${t.stop != null ? +(+t.stop).toPrecision(8) : ""}" placeholder="optional"></label>
-        <label>Target <input id="mfTgt" inputmode="decimal" value="${t.target != null ? +(+t.target).toPrecision(8) : ""}" placeholder="optional"></label>
+        <label>Stop loss <input id="mfStop" inputmode="decimal" value="${t.stop != null ? rp(t.stop) : ""}" placeholder="optional"></label>
+        <label>Target <input id="mfTgt" inputmode="decimal" value="${t.target != null ? rp(t.target) : ""}" placeholder="optional"></label>
         <label>Opened <input id="mfDate" type="datetime-local" value="${ed ? toLocal(t.opened) : nowLocal()}"></label>
         <label>Platform <input id="mfPlat" value="${esc(ed ? t.platform || "" : lastPlat)}" placeholder="e.g. IBKR, Moomoo, Binance"></label>
         <label class="full">Note <input id="mfNote" value="${esc(t.note || "")}" placeholder="optional"></label>
@@ -128,7 +129,7 @@
     const live = MT.price(t);
     const m = modal(`<div class="mthead"><b>Close ${esc(t.label || t.sym)} ${t.side > 0 ? "BUY" : "SELL"}</b><button class="mtx" data-x>✕</button></div>
       <p class="note" style="margin:0 0 10px">Entry ${px(t.entry)}${t.qty ? ` · qty ${t.qty}` : ""}. Enter the price you actually closed at.</p>
-      <div class="mtgrid"><label>Exit price <input id="mcPx" inputmode="decimal" value="${live != null ? +live.toPrecision(8) : ""}"><span class="hint">${live != null ? `live now ${px(live)}` : ""}${t.stop ? ` · <a href="#" data-fill="${t.stop}">stop ${px(t.stop)}</a>` : ""}${t.target ? ` · <a href="#" data-fill="${t.target}">target ${px(t.target)}</a>` : ""}</span></label>
+      <div class="mtgrid"><label>Exit price <input id="mcPx" inputmode="decimal" value="${live != null ? rp(live) : ""}"><span class="hint">${live != null ? `live now ${px(live)}` : ""}${t.stop ? ` · <a href="#" data-fill="${rp(t.stop)}">stop ${px(t.stop)}</a>` : ""}${t.target ? ` · <a href="#" data-fill="${rp(t.target)}">target ${px(t.target)}</a>` : ""}</span></label>
       <label>Closed <input id="mcDate" type="datetime-local" value="${nowLocal()}"></label></div>
       <div class="mtrisk" id="mcRes"></div>
       <div class="mtbtns"><button class="mtprimary" id="mcSave">Close trade</button><button data-x>Cancel</button></div>`);
@@ -141,7 +142,7 @@
 
   /* ---------------- the "My trades" page ---------------- */
   const dt = (iso) => (iso ? new Date(iso).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "–");
-  const sgn = (v, d = 2) => (v >= 0 ? "+" : "") + v.toFixed(d);
+  const sgn = (v, d = 2) => { const s = v.toFixed(d); return (/^-0\.0*$/.test(s) ? s.slice(1) : s).replace(/^(?!-)/, "+"); };
   MT.render = function (el) {
     const open = MT.list("open").sort((a, b) => b.opened.localeCompare(a.opened)), closed = MT.list("closed").sort((a, b) => (b.closed || "").localeCompare(a.closed || ""));
     const cs = closed.map((t) => ({ t, c: MT.calc(t) })), wins = cs.filter((x) => x.c.move > 0);
