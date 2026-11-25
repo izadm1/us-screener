@@ -18,7 +18,9 @@ const METHODS = {
   d_pb: { tf: "1D", grid: grid({ th: [5, 10, 20], k: [1, 1.5, 2], Rm: [1, 1.5, 2], H: [10], adx: [0, 20] }) },
   d_trail: { tf: "1D", grid: grid({ k: [1.5, 2, 3], Rm: [1, 1.5, 2], H: [20] }) },
   d_brk: { tf: "1D", grid: grid({ N: [20, 55], tf: [0, 1], k: [1.5, 2, 3], Rm: [1, 2, 3], H: [40] }) },
-  d_mr: { tf: "1D", grid: grid({ z: [2, 2.5], adx: [18, 22], k: [1, 1.5, 2], H: [10, 20] }) },
+  d_mr: { tf: "1D", grid: grid({ z: [2, 2.25, 2.5, 3], adx: [20, 22, 25, 99], k: [1, 1.5, 2], H: [5, 10], confirm: [0, 1], half: [0, 1] }) },
+  d_mrfx: { tf: "1D", fn: "d_mr", fxOnly: true, grid: grid({ z: [2, 2.25, 2.5, 3], adx: [20, 22, 25, 99], k: [1, 1.5, 2], H: [5, 10], confirm: [0, 1], half: [0, 1] }) },
+  h_mr: { tf: "1H", fxOnly: true, grid: grid({ n: [20, 50], z: [2.5, 3], adx: [22, 30, 99], k: [1.5, 2, 3], H: [6, 12, 24], confirm: [0, 1], half: [0], h0: [7], h1: [20] }) },
   d_mom: { tf: "1D", grid: grid({ L: [60, 120], min: [0, 0.5], k: [1, 1.5, 2], Rm: [1, 1.5, 2], H: [20] }) },
   h_pb: { tf: "1H", grid: grid({ th: [5, 10], k: [1, 1.5, 2, 3], Rm: [1, 1.5, 2], H: [12, 24], adx: [0, 20], e200: [0, 1], h0: [7], h1: [16] }) },
   h_lbo: { tf: "1H", grid: grid({ wMax: [0.5, 0.8, 1.2], trend: [0, 1], stopMid: [0, 1], Rm: [1, 1.5, 2], lastH: [10, 12] }) },
@@ -31,9 +33,11 @@ const iso = (t) => new Date(t * 1000).toISOString().slice(0, 10);
 
 function run(name, p, costMult) {
   const M = METHODS[name], all = [];
+  const fn = M.fn || name;
   for (const [s, v] of Object.entries(data)) {
+    if (M.fxOnly && s === "GC=F") continue;
     const B = M.tf === "1D" ? v.D : v.H; if (!B) continue;
-    const c = M.tf === "1D" ? FX.daily[name](B, p) : FX.hourly[name](B, v.ctx, p);
+    const c = M.tf === "1D" ? FX.daily[fn](B, p) : FX.hourly[fn](B, v.ctx, p);
     FX.simulate(B, c, s, { costMult }).forEach((x) => all.push(x));
   }
   const tr = all.filter((x) => x.t < SPLIT[M.tf]), te = all.filter((x) => x.t >= SPLIT[M.tf]);
@@ -41,7 +45,9 @@ function run(name, p, costMult) {
 }
 
 const report = { generated: new Date().toISOString(), split: { "1D": iso(SPLIT["1D"]), "1H": iso(SPLIT["1H"]) }, costs: FX.COST, methods: {} };
+const ONLY = process.argv[4] ? process.argv[4].split(",") : null;
 for (const [name, M] of Object.entries(METHODS)) {
+  if (ONLY && !ONLY.includes(name)) continue;
   const minN = 80, rows = [];
   for (const p of M.grid) { const r = run(name, p); rows.push({ p, train: r.train, test: r.test }); }
   const ok = rows.filter((r) => r.train.n >= minN);

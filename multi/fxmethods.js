@@ -25,6 +25,25 @@ var FX = (function () {
   }
   const adxVal = (adx, i) => (adx && adx[i] != null ? adx[i] : null);
 
+  // ---------- mean reversion core: fade a z-score stretch back toward the N-bar mean ----------
+  const _adxc = new WeakMap();
+  const adxA_cache = (B) => { if (!_adxc.has(B)) _adxc.set(B, adxA(B, 14)); return _adxc.get(B); };
+  const zA = (B, n) => B.map((x, i) => { if (i < n - 1) return null; let s = 0, s2 = 0; for (let j = i - n + 1; j <= i; j++) { s += B[j].c; s2 += B[j].c * B[j].c; } const m = s / n, sd = Math.sqrt(Math.max(0, s2 / n - m * m)); return sd ? { z: (B[i].c - m) / sd, m } : null; });
+  function mr(B, p, adxAt, kind, okBar) {
+    const a = atrA(B, 14), Z = zA(B, p.n || 20), out = [];
+    for (let i = 210; i < B.length; i++) { const q = Z[i], q1 = Z[i - 1]; if (!q || !q1) continue;
+      if (okBar && !okBar(i)) continue;
+      const ad = adxAt(i); if (!(ad != null && ad < p.adx)) continue;
+      let side = 0;
+      if (p.confirm) { if (q1.z >= p.z && q.z < q1.z && B[i].c < B[i - 1].c) side = -1; else if (q1.z <= -p.z && q.z > q1.z && B[i].c > B[i - 1].c) side = 1; }
+      else if (Math.abs(q.z) >= p.z && Math.abs(q1.z) < p.z) side = q.z > 0 ? -1 : 1;
+      if (!side) continue;
+      const tgt = p.half ? (B[i].c + q.m) / 2 : q.m;
+      out.push({ i, side, risk: p.k * a[i], tgtPx: tgt, Rmax: 3, H: p.H, kind });
+    }
+    return out;
+  }
+
   // ---------- DAILY methods ----------
   const daily = {
     // RSI(2) pullback inside the ATR-trail trend
@@ -51,13 +70,7 @@ var FX = (function () {
       return out;
     },
     // Mean reversion in quiet (low-ADX) markets: fade 2σ stretches back toward the 20-day mean
-    d_mr(D, p) {
-      const a = atrA(D, 14), adx = adxA(D, 14), out = [];
-      for (let i = 210; i < D.length; i++) { const w = D.slice(i - 19, i + 1).map((x) => x.c), m = w.reduce((s, v) => s + v, 0) / 20, sd = Math.sqrt(w.reduce((s, v) => s + (v - m) ** 2, 0) / 20); if (!sd) continue;
-        const z = (D[i].c - m) / sd; if (!(adxVal(adx, i) < p.adx)) continue;
-        if (Math.abs(z) >= p.z) { const side = z > 0 ? -1 : 1, risk = p.k * a[i]; out.push({ i, side, risk, tgtPx: m, Rmax: 3, H: p.H, kind: "Range reversion (daily)" }); } }
-      return out;
-    },
+    d_mr(D, p) { return mr(D, p, (i) => adxVal(adxA_cache(D), i), "Range reversion (daily)"); },
     // Time-series momentum + pullback to the 20 EMA
     d_mom(D, p) {
       const a = atrA(D, 14), e20 = emaA(D.map((x) => x.c), 20), out = [];
@@ -70,6 +83,8 @@ var FX = (function () {
 
   // ---------- HOURLY methods (need the daily context) ----------
   const hourly = {
+    // 1H mean reversion in quiet daily conditions, London/NY hours
+    h_mr(H, ctx, p) { return mr(H, p, (i) => { const di = prevDay(ctx, H[i].t); return di == null ? null : adxVal(ctx.adx, di); }, "Intraday reversion (1H)", (i) => { const h = hourUTC(H[i].t); return h >= p.h0 && h <= p.h1; }); },
     // RSI(2) dip on 1H in the direction of the daily trend, London/NY hours only
     h_pb(H, ctx, p) {
       const r2 = rsiA(H, 2), a = atrA(H, 14), e = emaA(H.map((x) => x.c), 200), out = [];
