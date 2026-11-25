@@ -411,7 +411,7 @@ function rankSide(r, H, side) {
 }
 function sidePicks(classes, H, side, n = 5) {
   const out = [];
-  classes.forEach((c) => (S.data.classes[c] || []).forEach((r) => { const x = rankSide(r, H, side); if (x) out.push(x); }));
+  classes.filter((c) => c !== "forex").forEach((c) => (S.data.classes[c] || []).forEach((r) => { const x = rankSide(r, H, side); if (x) out.push(x); })); // forex: only the tested range-reversion signal
   return out.sort((a, b) => b.ps - a.ps).slice(0, n);
 }
 function topPicks(H) {
@@ -419,6 +419,7 @@ function topPicks(H) {
   return sidePicks(classes, H, "buy");
 }
 function signalOf(r) { // weekly-horizon buy/sell call used in the Forex & Crypto tables
+  if (r._cls === "forex") { const x = FXA(r); return x ? { side: x.side > 0 ? "BUY" : "SELL", ps: x.tier === "quiet" ? 70 : 60 } : null; }
   const H = HORIZONS[1], b = rankSide(r, H, "buy"), s = rankSide(r, H, "sell");
   if (b && b.ps >= 65 && (!s || b.ps >= s.ps)) return { side: "BUY", ps: b.ps };
   if (s && s.ps >= 65) return { side: "SELL", ps: s.ps };

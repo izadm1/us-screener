@@ -117,7 +117,12 @@ function tradePlan(r, h) {
   why.push(tUp ? "Daily trend up (above 200-day, ATR trail long)" : tDn ? "Daily trend down (below 200-day, ATR trail short)" : "Daily trend mixed");
   why.push(wk === 1 ? "Weekly trend up" : wk === -1 ? "Weekly trend down" : "Weekly trend flat/unclear");
   if (ms.structure) why.push(`Structure: ${ms.structure}${ms.bos ? ` · ${ms.bos} break of structure` : ""}`);
-  const plan = { sig, conv, f, h, why, atr };
+  let cv = conv;
+  if (r._cls === "forex") { // trend-based verdicts lost money on forex in the forex lab, and the model's forex forecasts beyond 1 day are not significant
+    sig = "NEUTRAL"; cv = 0;
+    why.unshift("Forex: no BUY/SELL from the model — trend-based verdicts lost money on forex in testing. Entries come only from the tested forex range-reversion signal.");
+  }
+  const plan = { sig, conv: cv, f, h, why, atr };
   const dir = sig.includes("BUY") ? 1 : sig.includes("SELL") ? -1 : 0;
   plan.dir = dir;
   const sup = (ms.sup || []).map((x) => x.price), res = (ms.res || []).map((x) => x.price);
