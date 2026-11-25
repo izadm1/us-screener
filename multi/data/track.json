@@ -18,9 +18,9 @@
    "Rm": 1,
    "p": 0.5781433782193707,
    "status": "open",
-   "last": 155.380005,
-   "openR": 0.12304077426533082,
-   "barsHeld": 0
+   "last": 144.660995,
+   "openR": -0.3429925676749999,
+   "barsHeld": 1
   },
   {
    "id": "TLT|TRAIL|1|2026-11-24",
@@ -39,9 +39,9 @@
    "Rm": 1,
    "p": 0.618577400667579,
    "status": "open",
-   "last": 81.489998,
-   "openR": -0.1458923726977141,
-   "barsHeld": 0
+   "last": 82.419998,
+   "openR": 0.24738157899772026,
+   "barsHeld": 1
   },
   {
    "id": "JPM|LPS|1|2026-11-24",
@@ -60,9 +60,9 @@
    "Rm": 1,
    "p": 0.593347818137654,
    "status": "open",
-   "last": 317.100006,
-   "openR": -0.09076746912436096,
-   "barsHeld": 0
+   "last": 312.200012,
+   "openR": -0.5404820285298763,
+   "barsHeld": 1
   },
   {
    "id": "AMGN|TRAIL|1|2026-11-24",
@@ -81,9 +81,9 @@
    "Rm": 1,
    "p": 0.6373274903283809,
    "status": "open",
-   "last": 473.940002,
-   "openR": 0.013584354662174045,
-   "barsHeld": 0
+   "last": 467.420013,
+   "openR": -0.12061176712738035,
+   "barsHeld": 1
   },
   {
    "id": "SHY|TRAIL|1|2026-11-20",
@@ -102,10 +102,73 @@
    "Rm": 1,
    "p": 0.5921794592250915,
    "status": "open",
-   "last": 81.57,
+   "last": 81.690102,
+   "openR": 0.31808609310373587,
+   "barsHeld": 2
+  },
+  {
+   "id": "DE|Spring|1|2026-11-25",
+   "sym": "DE",
+   "label": "DE",
+   "cls": "stocks",
+   "side": 1,
+   "kind": "Spring",
+   "name": "Wyckoff Spring",
+   "sigDate": "2026-11-25",
+   "logged": "2026-11-25T15:10:01.258Z",
+   "loggedDay": 1795651199,
+   "entry": 629.02002,
+   "stop": 574.8033641234441,
+   "target": 683.236675876556,
+   "Rm": 1,
+   "p": 0.6060482354726815,
+   "status": "open",
+   "last": 629.02002,
    "openR": 0,
-   "barsHeld": 1
+   "barsHeld": 0
+  },
+  {
+   "id": "PLTR|LPS|1|2026-11-25",
+   "sym": "PLTR",
+   "label": "PLTR",
+   "cls": "stocks",
+   "side": 1,
+   "kind": "LPS",
+   "name": "Wyckoff Last Point of Support",
+   "sigDate": "2026-11-25",
+   "logged": "2026-11-25T15:10:01.258Z",
+   "loggedDay": 1795651199,
+   "entry": 156.619995,
+   "stop": 139.91753781605985,
+   "target": 173.32245218394013,
+   "Rm": 1,
+   "p": 0.6143339444780621,
+   "status": "open",
+   "last": 156.619995,
+   "openR": 0,
+   "barsHeld": 0
+  },
+  {
+   "id": "TLT|TRAIL|1|2026-11-25",
+   "sym": "TLT",
+   "label": "TLT",
+   "cls": "etfs",
+   "side": 1,
+   "kind": "TRAIL",
+   "name": "Trend flip (ATR 20×3)",
+   "sigDate": "2026-11-25",
+   "logged": "2026-11-25T15:10:01.258Z",
+   "loggedDay": 1795651199,
+   "entry": 82.419998,
+   "stop": 80.07557218136107,
+   "target": 84.76442381863895,
+   "Rm": 1,
+   "p": 0.6106041306717237,
+   "status": "open",
+   "last": 82.419998,
+   "openR": 0,
+   "barsHeld": 0
   }
  ],
- "updated": "2026-11-25T14:02:31.365Z"
+ "updated": "2026-11-25T15:10:01.258Z"
 }
